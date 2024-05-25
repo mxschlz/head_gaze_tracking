@@ -1,4 +1,3 @@
-
 """
 Eye Tracking and Head Pose Estimation
 
@@ -29,8 +28,18 @@ Theory:
 - EAR is used as a simple yet effective metric for eye closure detection.
 - Head pose angles are derived using a perspective-n-point approach, which estimates an object's pose from its 2D image points and 3D model points.
 
+UDP Packet Structure:
+- The UDP packet consists of a timestamp and four other integer values.
+- Packet Type: Mixed (int64 for timestamp, int32 for other values)
+- Packet Structure: [timestamp (int64), l_cx (int32), l_cy (int32), l_dx (int32), l_dy (int32)]
+- Packet Size: 24 bytes (8 bytes for int64 timestamp, 4 bytes each for the four int32 values)
+
+Example Packets:
+- Example 1: [1623447890123, 315, 225, 66, -3]
+- Example 2: [1623447891123, 227, 68, -1, 316]
+
 Parameters:
-You can change parameters as in face width, moving average window, webcam ID, terminal outputs, on screen data, loggin detail , etc. from the code 
+You can change parameters such as face width, moving average window, webcam ID, terminal outputs, on-screen data, logging detail, etc., from the code.
 
 Author: Alireza Bagheri
 GitHub: https://github.com/alireza787b/Python-Gaze-Face-Tracker
@@ -43,7 +52,7 @@ Initially inspired by Asadullah Dal's iris segmentation project (https://github.
 The blink detection feature is also contributed by Asadullah Dal (GitHub: Asadullah-Dal17).
 
 Usage:
--Run the script in a Python environment with the necessary dependencies installed. The script accepts command-line arguments for camera source configuration.
+- Run the script in a Python environment with the necessary dependencies installed. The script accepts command-line arguments for camera source configuration.
 - Press 'c' to recalibrate the head pose estimation to the current orientation.
 - Press 'r' to start/stop logging.
 - Press 'q' to exit the program.
@@ -53,8 +62,8 @@ Ensure that all dependencies, especially MediaPipe, OpenCV, and NumPy, are insta
 
 Note:
 This project is intended for educational and research purposes in fields like aviation, human-computer interaction, and more.
-
 """
+
 
 import cv2 as cv
 import numpy as np
@@ -619,8 +628,16 @@ try:
                 csv_data.append(log_entry)
 
             # Sending data through socket
-            packet = np.array([l_cx, l_cy, l_dx, l_dy], dtype=np.int32)
-            iris_socket.sendto(bytes(packet), SERVER_ADDRESS)
+            timestamp = int(time.time() * 1000)  # Current timestamp in milliseconds
+            # Create a packet with mixed types (int64 for timestamp and int32 for the rest)
+            packet = np.array([timestamp], dtype=np.int64).tobytes() + np.array([l_cx, l_cy, l_dx, l_dy], dtype=np.int32).tobytes()
+
+            SERVER_ADDRESS = ("127.0.0.1", 7070)
+            iris_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            iris_socket.sendto(packet, SERVER_ADDRESS)
+
+            print(f'Sent UDP packet to {SERVER_ADDRESS}: {packet}')
+
 
         # Writing the on screen data on the frame
             if SHOW_ON_SCREEN_DATA:

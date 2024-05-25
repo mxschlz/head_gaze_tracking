@@ -124,7 +124,29 @@ While running the Eye Tracking and Head Pose Estimation script, you can interact
 ---
 ## Data Logging & Telemetry
 - **CSV Logging**: The application generates CSV files with tracking data including timestamps, eye positions, and optional facial landmarks. These files are stored in the `logs` folder.
-- **UDP Telemetry**: The application sends only iris position data through UDP sockets as defined by `SERVER_IP` and `SERVER_PORT`. The data is sent in the following order: [Left Eye Center X, Left Eye Center Y, Left Iris Relative Pos Dx, Left Iris Relative Pos Dy].
+
+- **UDP Telemetry**: The application sends iris position data through UDP sockets as defined by `SERVER_IP` and `SERVER_PORT`. The data is sent in the following order: [Timestamp, Left Eye Center X, Left Eye Center Y, Left Iris Relative Pos Dx, Left Iris Relative Pos Dy].
+
+### UDP Packet Structure
+- **Packet Type**: Mixed (int64 for timestamp, int32 for other values)
+- **Packet Structure**: 
+  - Timestamp (int64)
+  - Left Eye Center X (int32)
+  - Left Eye Center Y (int32)
+  - Left Iris Relative Pos Dx (int32)
+  - Left Iris Relative Pos Dy (int32)
+- **Packet Size**: 24 bytes (8 bytes for int64 timestamp, 4 bytes each for the four int32 values)
+
+### Example Packets
+- **Example**: 
+  - Timestamp: 1623447890123
+  - Left Eye Center X: 315
+  - Left Eye Center Y: 225
+  - Left Iris Relative Pos Dx: 66
+  - Left Iris Relative Pos Dy: -3
+  - Packet: [1623447890123, 315, 225, 66, -3]
+  
+
 
 ---
 
