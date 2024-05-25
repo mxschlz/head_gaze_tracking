@@ -4,6 +4,9 @@
 ### Advanced Real-Time Eye, Facial Landmark, Head Pose, Gaze Direction Tracking System
 
 ---
+![image](https://github.com/alireza787b/Python-Gaze-Face-Tracker/assets/30341941/08db0391-c13f-4252-9a88-9d32b77181b9)
+
+
 <img src="https://github.com/alireza787b/Python-Gaze-Face-Tracker/assets/30341941/0e4b8068-9d80-4573-b5e7-2a2a6061c594" style="text-align:center">
 
 ![image](https://github.com/alireza787b/Python-Gaze-Face-Tracker/assets/30341941/ce20ac3a-6785-448e-85df-4d2dd5f22040)
