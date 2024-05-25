@@ -5,6 +5,7 @@
 
 ---
 ![image](https://github.com/alireza787b/Python-Gaze-Face-Tracker/assets/30341941/08db0391-c13f-4252-9a88-9d32b77181b9)
+![image](https://github.com/alireza787b/Python-Gaze-Face-Tracker/assets/30341941/8ad43aa9-dd3f-48b5-9e61-e375bc1db70f)
 
 
 <img src="https://github.com/alireza787b/Python-Gaze-Face-Tracker/assets/30341941/0e4b8068-9d80-4573-b5e7-2a2a6061c594" style="text-align:center">
