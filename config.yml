@@ -15,13 +15,8 @@ NOSE_TO_CAMERA_DISTANCE: 600  # [mm]
 ## Configuration Parameters
 # PRINT_DATA: Enable or disable the printing of data to the console for debugging.
 PRINT_DATA: True
-# DEFAULT_WEBCAM: Default camera source index. '0' usually refers to the built-in webcam.
-WEBCAM: 0
-# VIDEO_PATH: If provided, use the video for analysis. Default Webcam must be None if path is provided.
-VIDEO_INPUT: None  #  /home/max/Videos/Bildschirmaufzeichnungen/Bildschirmaufzeichnung vom 2024-09-17, 14-40-29.webm
-# SHOW_ALL_FEATURES: If True, display all facial landmarks on the video feed.
-VIDEO_OUTPUT: output.avi
 FLIP_VIDEO: True
+# SHOW_ALL_FEATURES: If True, display all facial landmarks on the video feed.
 SHOW_ALL_FEATURES: True
 # LOG_DATA: Enable or disable logging of data to a CSV file.
 LOG_DATA: True
@@ -29,9 +24,6 @@ LOG_DATA: True
 LOG_ALL_FEATURES: False
 # ENABLE_HEAD_POSE: Enable the head position and orientation estimator.
 ENABLE_HEAD_POSE: True
-## Logging Configuration
-# LOG_FOLDER: Directory where log files will be stored.
-LOG_FOLDER: "logs"
 ## Server Configuration
 # SERVER_IP: IP address of the server for sending data via UDP (default is localhost).
 SERVER_IP: "127.0.0.1"
@@ -46,8 +38,8 @@ BLINK_THRESHOLD: 0.51
 EYE_AR_CONSEC_FRAMES: 2
 ## MediaPipe Model Confidence Parameters
 # These thresholds determine how confidently the model must detect or track to consider the results valid.
-MIN_DETECTION_CONFIDENCE: 0.8
-MIN_TRACKING_CONFIDENCE: 0.8
+MIN_DETECTION_CONFIDENCE: 0.5  # I think these are the original values
+MIN_TRACKING_CONFIDENCE: 0.5
 ## Angle Normalization Parameters
 # MOVING_AVERAGE_WINDOW: The number of frames over which to calculate the moving average for smoothing angles.
 MOVING_AVERAGE_WINDOW: 10
