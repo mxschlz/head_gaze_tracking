@@ -1,6 +1,0 @@
-opencv-python~=4.10.0.84
-mediapipe~=0.10.15
-numpy~=1.26.4
-scipy
-
-yaml~=0.2.5
