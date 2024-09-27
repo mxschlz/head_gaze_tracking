@@ -11,9 +11,15 @@ import yaml
 
 
 class HeadGazeTracker(object):
-	def __init__(self, config_file_path="config.yaml"):
+	def __init__(self, subject_id=None, config_file_path="config.yaml", VIDEO_INPUT=None, VIDEO_OUTPUT=None, WEBCAM=0,
+				TRACKING_DATA_LOG_FOLDER=None):
 		self.load_config(file_path=config_file_path)
+		self.subject_id = subject_id
 		self.TOTAL_BLINKS = 0
+		self.VIDEO_INPUT = VIDEO_INPUT
+		self.VIDEO_OUTPUT = VIDEO_OUTPUT
+		self.TRACKING_DATA_LOG_FOLDER = TRACKING_DATA_LOG_FOLDER
+		self.WEBCAM = WEBCAM
 		self.initial_pitch, self.initial_yaw, self.initial_roll = None, None, None
 		self.calibrated = False
 		# SERVER_ADDRESS: Tuple containing the SERVER_IP and SERVER_PORT for UDP communication.
@@ -222,7 +228,7 @@ class HeadGazeTracker(object):
 
 	def init_video_input(self):
 		if self.WEBCAM is None:  # Check if a video file path is provided
-			cap = cv.VideoCapture(self.VIDEO_PATH)  # Replace with your file path
+			cap = cv.VideoCapture(self.VIDEO_INPUT)  # Replace with your file path
 			if not cap.isOpened():
 				print("Error opening video file")
 				return  # Exit the function if the video can't be opened
@@ -520,7 +526,7 @@ class HeadGazeTracker(object):
 					print("Writing data to CSV...")
 				timestamp_str = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
 				csv_file_name = os.path.join(
-					self.LOG_FOLDER, f"eye_tracking_log_{timestamp_str}.csv"
+					self.TRACKING_DATA_LOG_FOLDER, f"{self.subject_id}_eye_tracking_log_{timestamp_str}.csv"
 				)
 				with open(csv_file_name, "w", newline="") as file:
 					writer = csv.writer(file)
