@@ -12,8 +12,6 @@ dependencies:
   - sqlite=3.45.3
   - tk=8.6.14
   - tzdata=2024a
-  - vc=14.40
-  - vs2015_runtime=14.40.33807
   - wheel=0.44.0
   - xz=5.4.6
   - zlib=1.2.13
