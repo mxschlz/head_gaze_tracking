@@ -62,3 +62,4 @@ RIGHT_MOUTH_CORNER_INDEX: 291
 # Face Selected points indices for Head Pose Estimation
 _indices_pose: [1, 33, 61, 199, 263, 291]
 MAX_NUM_FACES: 1
+TIMESTAMP_FORMAT: '%Y%m%d%H%M%S%f'
