@@ -3,6 +3,7 @@ import socket
 import time
 import csv
 from datetime import datetime
+import datetime as dt
 import os
 from AngleBuffer import AngleBuffer
 import cv2 as cv
@@ -12,8 +13,10 @@ import yaml
 
 class HeadGazeTracker(object):
 	def __init__(self, subject_id=None, config_file_path="config.yaml", VIDEO_INPUT=None, VIDEO_OUTPUT=None, WEBCAM=0,
-				TRACKING_DATA_LOG_FOLDER=None):
+				TRACKING_DATA_LOG_FOLDER=None, starting_timestamp=None, total_frames=None):
 		self.load_config(file_path=config_file_path)
+		self.starting_timestamp = datetime.strptime(str(starting_timestamp), self.TIMESTAMP_FORMAT)  # must be UTC time (YYYYMMDDHHMMSSUUUUUU)
+		self.total_frames = total_frames
 		self.subject_id = subject_id
 		self.TOTAL_BLINKS = 0
 		self.VIDEO_INPUT = VIDEO_INPUT
@@ -27,12 +30,14 @@ class HeadGazeTracker(object):
 		self.IS_RECORDING = False
 		self.EYES_BLINK_FRAME_COUNTER = (0)
 		self.cap = self.init_video_input()
+		self.FPS = self.cap.get(cv.CAP_PROP_FPS)
 		self.face_mesh = self.init_face_mesh()
 		self.socket = self.init_socket()
 		self.csv_data = []
 		# Column names for CSV file
 		self.column_names = [
 			"Timestamp (ms)",
+			"Frame Nr",
 			"Left Eye Center X",
 			"Left Eye Center Y",
 			"Right Eye Center X",
@@ -228,7 +233,8 @@ class HeadGazeTracker(object):
 
 	def init_video_input(self):
 		if self.WEBCAM is None:  # Check if a video file path is provided
-			cap = cv.VideoCapture(self.VIDEO_INPUT)  # Replace with your file path
+			if self.VIDEO_INPUT:
+				cap = cv.VideoCapture(self.VIDEO_INPUT)  # Replace with your file path
 			if not cap.isOpened():
 				print("Error opening video file")
 				return  # Exit the function if the video can't be opened
@@ -262,6 +268,9 @@ class HeadGazeTracker(object):
 
 		# self.init_data_handle()
 		# Main loop for video capture and processing
+		frame_count = -1  # count frames from -1 because 0 is first
+		increment = dt.timedelta(seconds=1 / self.FPS)  # get frame duration
+
 		try:
 			angle_buffer = AngleBuffer(size=self.MOVING_AVERAGE_WINDOW)  # Adjust size for smoothing
 
@@ -270,6 +279,8 @@ class HeadGazeTracker(object):
 				# frame = crop_bottom_half(frame)
 				if not ret:
 					break
+
+				frame_count += 1  # add one per iteration
 
 				# Flipping the frame for a mirror effect
 				# I think we better not flip to correspond with real world... need to make sure later...
@@ -446,8 +457,12 @@ class HeadGazeTracker(object):
 								print(f"Head Pose Angles: Pitch={pitch}, Yaw={yaw}, Roll={roll}")
 					# Logging data
 					if self.LOG_DATA:
-						timestamp = int(time.time() * 1000)  # Current timestamp in milliseconds
-						log_entry = [timestamp, l_cx, l_cy, r_cx, r_cy, l_dx, l_dy, r_dx, r_dy,
+						if not self.starting_timestamp:
+							timestamp = int(time.time() * 1000)  # Current timestamp in milliseconds
+						else:
+							timestamp = self.starting_timestamp + increment * frame_count
+							timestamp = int(timestamp.strftime(self.TIMESTAMP_FORMAT))
+						log_entry = [timestamp, frame_count, l_cx, l_cy, r_cx, r_cy, l_dx, l_dy, r_dx, r_dy,
 						             self.TOTAL_BLINKS]  # Include blink count in CSV
 
 						# Append head pose data if enabled
