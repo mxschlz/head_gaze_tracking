@@ -281,6 +281,7 @@ class HeadGazeTracker(object):
 					break
 
 				frame_count += 1  # add one per iteration
+				print(frame_count)
 
 				# Flipping the frame for a mirror effect
 				# I think we better not flip to correspond with real world... need to make sure later...
@@ -455,22 +456,26 @@ class HeadGazeTracker(object):
 
 							if self.PRINT_DATA:
 								print(f"Head Pose Angles: Pitch={pitch}, Yaw={yaw}, Roll={roll}")
-					# Logging data
-					if self.LOG_DATA:
-						if not self.starting_timestamp:
-							timestamp = int(time.time() * 1000)  # Current timestamp in milliseconds
-						else:
-							timestamp = self.starting_timestamp + increment * frame_count
-							timestamp = int(timestamp.strftime(self.TIMESTAMP_FORMAT))
-						log_entry = [timestamp, frame_count, l_cx, l_cy, r_cx, r_cy, l_dx, l_dy, r_dx, r_dy,
-						             self.TOTAL_BLINKS]  # Include blink count in CSV
+				elif not results.multi_face_landmarks:
+					l_cx = l_cy = r_cx = r_cy = l_dx = l_dy = r_dx = r_dy = roll = pitch = yaw =0
 
-						# Append head pose data if enabled
-						if self.ENABLE_HEAD_POSE:
-							log_entry.extend([pitch, yaw, roll])
-						if self.LOG_ALL_FEATURES:
-							log_entry.extend([p for point in mesh_points for p in point])
-						self.csv_data.append(log_entry)
+				# Logging data
+				if self.LOG_DATA:
+					if not self.starting_timestamp:
+						timestamp = int(time.time() * 1000)  # Current timestamp in milliseconds
+					elif self.starting_timestamp:
+						timestamp = self.starting_timestamp + increment * frame_count
+						timestamp = int(timestamp.strftime(self.TIMESTAMP_FORMAT))
+						print(timestamp)
+					log_entry = [timestamp, frame_count, l_cx, l_cy, r_cx, r_cy, l_dx, l_dy, r_dx, r_dy,
+					             self.TOTAL_BLINKS]  # Include blink count in CSV
+
+					# Append head pose data if enabled
+					if self.ENABLE_HEAD_POSE:
+						log_entry.extend([pitch, yaw, roll])
+					if self.LOG_ALL_FEATURES:
+						log_entry.extend([p for point in mesh_points for p in point])
+					self.csv_data.append(log_entry)
 
 					# Sending data through socket
 					timestamp = int(time.time() * 1000)  # Current timestamp in milliseconds
