@@ -9,6 +9,11 @@ from AngleBuffer import AngleBuffer
 import cv2 as cv
 import mediapipe as mp
 import yaml
+# some good aesthetics
+mp_drawing = mp.solutions.drawing_utils
+mp_drawing_styles = mp.solutions.drawing_styles
+mp_face_mesh = mp.solutions.face_mesh
+drawing_spec = mp_drawing.DrawingSpec(thickness=1, circle_radius=0)
 
 
 class HeadGazeTracker(object):
@@ -132,10 +137,10 @@ class HeadGazeTracker(object):
 		image_points = np.array([
 			landmarks[self.NOSE_TIP_INDEX],  # Nose tip
 			landmarks[self.CHIN_INDEX],  # Chin
-			landmarks[self.LEFT_EYE_LEFT_CORNER_INDEX],  # Left eye left corner
-			landmarks[self.RIGHT_EYE_RIGHT_CORNER_INDEX],  # Right eye right corner
-			landmarks[self.LEFT_MOUTH_CORNER_INDEX],  # Left mouth corner
-			landmarks[self.RIGHT_MOUTH_CORNER_INDEX]  # Right mouth corner
+			landmarks[self.LEFT_EYE_OUTER_CORNER],  # Left eye left corner
+			landmarks[self.RIGHT_EYE_OUTER_CORNER],  # Right eye right corner
+			landmarks[self.LEFT_MOUTH_CORNER],  # Left mouth corner
+			landmarks[self.RIGHT_MOUTH_CORNER]  # Right mouth corner
 		], dtype="double")
 
 		# Solve for pose
@@ -225,7 +230,7 @@ class HeadGazeTracker(object):
 
 		mp_face_mesh = mp.solutions.face_mesh.FaceMesh(
 			max_num_faces=self.MAX_NUM_FACES,
-			refine_landmarks=True,
+			refine_landmarks=self.USE_ATTENTION_MESH,
 			min_detection_confidence=self.MIN_DETECTION_CONFIDENCE,
 			min_tracking_confidence=self.MIN_TRACKING_CONFIDENCE,
 		)
@@ -239,16 +244,29 @@ class HeadGazeTracker(object):
 				print("Error opening video file")
 				return  # Exit the function if the video can't be opened
 			# Get the original FPS of the video
-		else:  # Use the default webcam
+		elif not self.VIDEO_INPUT:  # Use the default webcam
 			cap = cv.VideoCapture(self.WEBCAM)
 			if not cap.isOpened():
 				print("Error opening webcam")
 				return  # Exit if webcam can't be opened
+		else:
+			raise ValueError("Please provide video or enable webcam input!")
 		return cap
 
 	def init_video_output(self):
 		return cv.VideoWriter(self.VIDEO_OUTPUT, cv.VideoWriter_fourcc(*'XVID'), self.cap.get(cv.CAP_PROP_FPS),
 		                     (int(self.cap.get(3)), int(self.cap.get(4))))
+
+	def send_data_through_socket(self, timestamp, l_cx, l_cy, l_dx, l_dy):
+		# Sending data through socket
+		# Create a packet with mixed types (int64 for timestamp and int32 for the rest)
+		packet = np.array([timestamp], dtype=np.int64).tobytes() + np.array([l_cx, l_cy, l_dx, l_dy],
+		                                                                    dtype=np.int32).tobytes()
+
+		iris_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		iris_socket.sendto(packet, self.SERVER_ADDRESS)
+
+		print(f'Sent UDP packet to {self.SERVER_ADDRESS}: {packet}')
 
 	@staticmethod
 	def init_socket():
@@ -261,27 +279,33 @@ class HeadGazeTracker(object):
 			self.column_names.extend(["Pitch", "Yaw", "Roll"])
 
 		if self.LOG_ALL_FEATURES:
-			self.column_names.extend(
-				[f"Landmark_{i}_X" for i in range(468)]
-				+ [f"Landmark_{i}_Y" for i in range(468)]
-			)
+			if not self.USE_ATTENTION_MESH:
+				self.column_names.extend(
+					[f"Landmark_{i}_X" for i in range(468)]
+					+ [f"Landmark_{i}_Y" for i in range(468)])
+			elif self.USE_ATTENTION_MESH:
+				self.column_names.extend(
+					[f"Landmark_{i}_X" for i in range(478)]
+					+ [f"Landmark_{i}_Y" for i in range(478)])
 
 		# self.init_data_handle()
 		# Main loop for video capture and processing
 		frame_count = -1  # count frames from -1 because 0 is first
-		increment = dt.timedelta(seconds=1 / self.FPS)  # get frame duration
+		frame_increment = dt.timedelta(seconds=1 / self.FPS)  # get frame duration
 
 		try:
 			angle_buffer = AngleBuffer(size=self.MOVING_AVERAGE_WINDOW)  # Adjust size for smoothing
 
 			while True:
+				frame_count += 1  # add one per iteration
 				ret, frame = self.cap.read()
+				#cv.imshow("Frame", frame)
 				# frame = crop_bottom_half(frame)
 				if not ret:
 					break
 
-				frame_count += 1  # add one per iteration
-				print(frame_count)
+				if self.PRINT_DATA:
+					print(f"Frame Nr.: {frame_count}")
 
 				# Flipping the frame for a mirror effect
 				# I think we better not flip to correspond with real world... need to make sure later...
@@ -311,7 +335,7 @@ class HeadGazeTracker(object):
 					head_pose_points_2D = mesh_points[self._indices_pose]
 
 					# collect nose three dimension and two dimension points
-					nose_3D_point = np.multiply(head_pose_points_3D[0], [1, 1, 3000])
+					# nose_3D_point = np.multiply(head_pose_points_3D[0], [1, 1, 3000])
 					nose_2D_point = head_pose_points_2D[0]
 
 					# create the camera matrix
@@ -340,7 +364,7 @@ class HeadGazeTracker(object):
 					# Get the y rotation degree
 					angle_x = angles[0] * 360
 					angle_y = angles[1] * 360
-					z = angles[2] * 360
+					#z = angles[2] * 360
 
 					# if angle cross the values then
 					threshold_angle = 10
@@ -363,13 +387,12 @@ class HeadGazeTracker(object):
 							cv.FONT_HERSHEY_TRIPLEX,
 							0.8,
 							(0, 255, 0),
-							2,
+							1,
 							cv.LINE_AA,
 						)
 					# Display the nose direction
-					nose_3d_projection, jacobian = cv.projectPoints(
-						nose_3D_point, rot_vec, trans_vec, cam_matrix, dist_matrix
-					)
+					#nose_3d_projection, jacobian = cv.projectPoints(nose_3D_point, rot_vec, trans_vec,
+					                                                #cam_matrix, dist_matrix)
 
 					p1 = nose_2D_point
 					p2 = (
@@ -396,8 +419,14 @@ class HeadGazeTracker(object):
 
 					# Display all facial landmarks if enabled
 					if self.SHOW_ALL_FEATURES:
-						for point in mesh_points:
-							cv.circle(frame, tuple(point), 1, (0, 255, 0), -1)
+						for face_landmarks in results.multi_face_landmarks:
+							mp_drawing.draw_landmarks(
+								image=frame,
+								landmark_list=face_landmarks,
+								connections=mp_face_mesh.FACEMESH_TESSELATION,
+								landmark_drawing_spec=drawing_spec,
+								connection_drawing_spec=mp_drawing_styles
+								.get_default_face_mesh_tesselation_style())
 					# Process and display eye features
 					(l_cx, l_cy), l_radius = cv.minEnclosingCircle(mesh_points[self.LEFT_EYE_IRIS])
 					(r_cx, r_cy), r_radius = cv.minEnclosingCircle(mesh_points[self.RIGHT_EYE_IRIS])
@@ -405,24 +434,28 @@ class HeadGazeTracker(object):
 					center_right = np.array([r_cx, r_cy], dtype=np.int32)
 
 					# Highlighting the irises and corners of the eyes
+					# left iris in pink
 					cv.circle(
-						frame, center_left, int(l_radius), (255, 0, 255), 2, cv.LINE_AA
-					)  # Left iris
+						frame, center_left, int(l_radius), (255, 0, 255), 2, cv.LINE_AA)
+					# right iris in pink
 					cv.circle(
-						frame, center_right, int(r_radius), (255, 0, 255), 2, cv.LINE_AA
-					)  # Right iris
+						frame, center_right, int(r_radius), (255, 0, 255), 2, cv.LINE_AA)
+					# left eye inner corner in blue
 					cv.circle(
-						frame, mesh_points[self.LEFT_EYE_INNER_CORNER][0], 3, (255, 255, 255), -1, cv.LINE_AA
-					)  # Left eye right corner
+						frame, mesh_points[self.LEFT_EYE_INNER_CORNER], 3, (255, 0, 0), -1, cv.LINE_AA)
+					# left eye outer corner in yellow
+					# cv.circle(
+						# frame, mesh_points[self.LEFT_EYE_OUTER_CORNER], 3, (0, 255, 255), -1, cv.LINE_AA)
+					# right eye inner corner in blue
 					cv.circle(
-						frame, mesh_points[self.LEFT_EYE_OUTER_CORNER][0], 3, (0, 255, 255), -1, cv.LINE_AA
-					)  # Left eye left corner
-					cv.circle(
-						frame, mesh_points[self.RIGHT_EYE_INNER_CORNER][0], 3, (255, 255, 255), -1, cv.LINE_AA
-					)  # Right eye right corner
-					cv.circle(
-						frame, mesh_points[self.RIGHT_EYE_OUTER_CORNER][0], 3, (0, 255, 255), -1, cv.LINE_AA
-					)  # Right eye left corner
+						frame, mesh_points[self.RIGHT_EYE_INNER_CORNER], 3, (255, 0, 0), -1, cv.LINE_AA)
+					# right eye outer corner in yellow
+					# cv.circle(
+						# frame, mesh_points[self.RIGHT_EYE_OUTER_CORNER], 3, (0, 255, 255), -1, cv.LINE_AA)
+					# landmarks relevant for head pose estimation in red
+					for pose in self._indices_pose:
+						cv.circle(
+							frame, mesh_points[pose], 3, (0, 0, 255), -1, cv.LINE_AA)
 
 					# Calculating relative positions
 					l_dx, l_dy = self.vector_position(mesh_points[self.LEFT_EYE_OUTER_CORNER], center_left)
@@ -436,71 +469,73 @@ class HeadGazeTracker(object):
 						print(f"Left Iris Relative Pos Dx: {l_dx} Dy: {l_dy}")
 						print(f"Right Iris Relative Pos Dx: {r_dx} Dy: {r_dy}\n")
 						# Check if head pose estimation is enabled
-						if self.ENABLE_HEAD_POSE:
-							pitch, yaw, roll = self.estimate_head_pose(mesh_points, (img_h, img_w))
-							angle_buffer.add([pitch, yaw, roll])
-							pitch, yaw, roll = angle_buffer.get_average()
+					if self.ENABLE_HEAD_POSE:
+						pitch, yaw, roll = self.estimate_head_pose(mesh_points, (img_h, img_w))
+						angle_buffer.add([pitch, yaw, roll])
+						pitch, yaw, roll = angle_buffer.get_average()
 
-							# Set initial angles on first successful estimation or recalibrate
-							if self.initial_pitch is None or (key == ord('c') and self.calibrated):
-								self.initial_pitch, self.initial_yaw, self.initial_roll = pitch, yaw, roll
-								self.calibrated = True
-								if self.PRINT_DATA:
-									print("Head pose recalibrated.")
-
-							# Adjust angles based on initial calibration
-							if self.calibrated:
-								pitch -= self.initial_pitch
-								yaw -= self.initial_yaw
-								roll -= self.initial_roll
-
+						# Set initial angles on first successful estimation or recalibrate
+						if self.initial_pitch is None or (key == ord('c') and self.calibrated):
+							self.initial_pitch, self.initial_yaw, self.initial_roll = pitch, yaw, roll
+							self.calibrated = True
 							if self.PRINT_DATA:
-								print(f"Head Pose Angles: Pitch={pitch}, Yaw={yaw}, Roll={roll}")
+								print("Head pose recalibrated.")
+
+						# Adjust angles based on initial calibration
+						if self.calibrated:
+							pitch -= self.initial_pitch
+							yaw -= self.initial_yaw
+							roll -= self.initial_roll
+
+						if self.PRINT_DATA:
+							print(f"Head Pose Angles: Pitch={pitch}, Yaw={yaw}, Roll={roll}")
 				elif not results.multi_face_landmarks:
-					l_cx = l_cy = r_cx = r_cy = l_dx = l_dy = r_dx = r_dy = roll = pitch = yaw =0
+					l_cx = l_cy = r_cx = r_cy = l_dx = l_dy = r_dx = r_dy = roll = pitch = yaw = 0
 
 				# Logging data
 				if self.LOG_DATA:
 					if not self.starting_timestamp:
 						timestamp = int(time.time() * 1000)  # Current timestamp in milliseconds
 					elif self.starting_timestamp:
-						timestamp = self.starting_timestamp + increment * frame_count
+						timestamp = self.starting_timestamp + frame_increment * frame_count
 						timestamp = int(timestamp.strftime(self.TIMESTAMP_FORMAT))
-						print(timestamp)
+						# print(timestamp)
 					log_entry = [timestamp, frame_count, l_cx, l_cy, r_cx, r_cy, l_dx, l_dy, r_dx, r_dy,
 					             self.TOTAL_BLINKS]  # Include blink count in CSV
+
+					if self.USE_SOCKET:
+						self.send_data_through_socket(timestamp, l_cx, l_cy, l_dx, l_dy)
 
 					# Append head pose data if enabled
 					if self.ENABLE_HEAD_POSE:
 						log_entry.extend([pitch, yaw, roll])
 					if self.LOG_ALL_FEATURES:
-						log_entry.extend([p for point in mesh_points for p in point])
+						try:
+							log_entry.extend([p for point in mesh_points for p in point])
+						except:
+							if not self.USE_ATTENTION_MESH:
+								log_entry.extend([0] * 468)
+							elif self.USE_ATTENTION_MESH:
+								log_entry.extend([0] * 478)
 					self.csv_data.append(log_entry)
-
-					# Sending data through socket
-					timestamp = int(time.time() * 1000)  # Current timestamp in milliseconds
-					# Create a packet with mixed types (int64 for timestamp and int32 for the rest)
-					packet = np.array([timestamp], dtype=np.int64).tobytes() + np.array([l_cx, l_cy, l_dx, l_dy],
-					                                                                    dtype=np.int32).tobytes()
-
-					iris_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-					iris_socket.sendto(packet, self.SERVER_ADDRESS)
-
-					print(f'Sent UDP packet to {self.SERVER_ADDRESS}: {packet}')
 
 					# Writing the on screen data on the frame
 					if self.SHOW_ON_SCREEN_DATA:
 						if self.IS_RECORDING:
 							cv.circle(frame, (30, 30), 10, (0, 0, 255), -1)  # Red circle at the top-left corner
-						cv.putText(frame, f"Blinks: {self.TOTAL_BLINKS}", (30, 80), cv.FONT_HERSHEY_DUPLEX, 0.8, (0, 255, 0),
-						           2, cv.LINE_AA)
+						cv.putText(frame, f"Blinks: {self.TOTAL_BLINKS}", (30, 80), cv.FONT_HERSHEY_TRIPLEX,
+						           0.8, (0, 255, 0),
+						           1, cv.LINE_AA)
+						cv.putText(frame, f'FPS: {int(self.FPS)}', (20, 450), cv.FONT_HERSHEY_TRIPLEX,
+						           0.8, (0, 255, 0), 1, cv.LINE_AA)
+
 						if self.ENABLE_HEAD_POSE:
-							cv.putText(frame, f"Pitch: {int(pitch)}", (30, 110), cv.FONT_HERSHEY_DUPLEX, 0.8,
-							           (0, 255, 0), 2, cv.LINE_AA)
-							cv.putText(frame, f"Yaw: {int(yaw)}", (30, 140), cv.FONT_HERSHEY_DUPLEX, 0.8, (0, 255, 0),
-							           2, cv.LINE_AA)
-							cv.putText(frame, f"Roll: {int(roll)}", (30, 170), cv.FONT_HERSHEY_DUPLEX, 0.8, (0, 255, 0),
-							           2, cv.LINE_AA)
+							cv.putText(frame, f"Pitch: {int(pitch)}", (30, 110), cv.FONT_HERSHEY_TRIPLEX, 0.8,
+							           (0, 255, 0), 1, cv.LINE_AA)
+							cv.putText(frame, f"Yaw: {int(yaw)}", (30, 140), cv.FONT_HERSHEY_TRIPLEX, 0.8, (0, 255, 0),
+							           1, cv.LINE_AA)
+							cv.putText(frame, f"Roll: {int(roll)}", (30, 170), cv.FONT_HERSHEY_TRIPLEX, 0.8, (0, 255, 0),
+							           1, cv.LINE_AA)
 
 				# Displaying the processed frame
 				cv.imshow("Eye Tracking", frame)
@@ -544,10 +579,20 @@ class HeadGazeTracker(object):
 			if self.LOG_DATA and self.IS_RECORDING:
 				if self.PRINT_DATA:
 					print("Writing data to CSV...")
-				timestamp_str = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+				timestamp_str = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
 				csv_file_name = os.path.join(
 					self.TRACKING_DATA_LOG_FOLDER, f"{self.subject_id}_eye_tracking_log_{timestamp_str}.csv"
 				)
+				# fill missing frames with 0 values in csv data
+				if len(self.csv_data) < self.total_frames:
+					diff_to_fill = self.total_frames - len(self.csv_data)
+					for frame in range(1, diff_to_fill+1):
+						timestamp = self.starting_timestamp + frame_increment * (frame_count + frame)
+						timestamp = int(timestamp.strftime(self.TIMESTAMP_FORMAT))
+						log_entry = [timestamp, frame_count + frame, l_cx, l_cy, r_cx, r_cy, l_dx, l_dy, r_dx, r_dy,
+						             self.TOTAL_BLINKS]  # Include blink count in CSV
+						log_entry.extend([0, 0, 0])  # extend yaw, pitch, roll
+						self.csv_data.append(log_entry)
 				with open(csv_file_name, "w", newline="") as file:
 					writer = csv.writer(file)
 					writer.writerow(self.column_names)  # Writing column names
