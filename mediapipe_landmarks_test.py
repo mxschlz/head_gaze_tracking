@@ -7,13 +7,14 @@ import queue
 WEBCAM_NUMBER = 0  # Change this to use a different webcam
 MIN_DETECTION_CONFIDENCE = 0.5
 MIN_TRACKING_CONFIDENCE = 0.5
-MAX_LANDMARKS = 467  # Max landmark number in MediaPipe (0-467)
+MAX_LANDMARKS = 478  # Max landmark number in MediaPipe (0-467)
 
 # Initialize MediaPipe Face Mesh.
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
     min_detection_confidence=MIN_DETECTION_CONFIDENCE, 
-    min_tracking_confidence=MIN_TRACKING_CONFIDENCE
+    min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
+    refine_landmarks=True
 )
 
 # Function to mark landmarks on the image.
@@ -72,7 +73,8 @@ def main():
                 continue
 
             # Flip the image horizontally for a later selfie-view display, and convert the BGR image to RGB.
-            image = cv2.cvtColor(cv2.flip(image, 1), cv2.COLOR_BGR2RGB)
+            # image = cv2.cvtColor(cv2.flip(image, 1), cv2.COLOR_BGR2RGB)
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             results = face_mesh.process(image)
 
             # Convert back to BGR for OpenCV rendering.
