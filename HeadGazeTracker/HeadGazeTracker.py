@@ -20,8 +20,14 @@ class HeadGazeTracker(object):
 	def __init__(self, subject_id=None, config_file_path="config.yaml", VIDEO_INPUT=None, VIDEO_OUTPUT=None, WEBCAM=0,
 				TRACKING_DATA_LOG_FOLDER=None, starting_timestamp=None, total_frames=None):
 		self.load_config(file_path=config_file_path)
-		self.starting_timestamp = datetime.strptime(str(starting_timestamp), self.TIMESTAMP_FORMAT)  # must be UTC time (YYYYMMDDHHMMSSUUUUUU)
-		self.total_frames = total_frames
+		if not starting_timestamp:
+			self.starting_timestamp = datetime.now()
+		elif starting_timestamp:
+			self.starting_timestamp = datetime.strptime(str(starting_timestamp), self.TIMESTAMP_FORMAT)  # must be UTC time (YYYYMMDDHHMMSSUUUUUU)
+		if not total_frames:
+			self.total_frames = 0
+		elif total_frames:
+			self.total_frames = total_frames
 		self.subject_id = subject_id
 		self.TOTAL_BLINKS = 0
 		self.VIDEO_INPUT = VIDEO_INPUT
@@ -178,7 +184,7 @@ class HeadGazeTracker(object):
 			pitch -= 360
 
 		# Invert the pitch angle for intuitive up/down movement
-		pitch = -pitch
+		# pitch = -pitch
 
 		# Ensure that the pitch is within the range of [-90, 90]
 		if pitch < -90:
@@ -393,14 +399,12 @@ class HeadGazeTracker(object):
 					# Display the nose direction
 					#nose_3d_projection, jacobian = cv.projectPoints(nose_3D_point, rot_vec, trans_vec,
 					                                                #cam_matrix, dist_matrix)
-
 					p1 = nose_2D_point
 					p2 = (
 						int(nose_2D_point[0] + angle_y * 10),
 						int(nose_2D_point[1] - angle_x * 10),
 					)
-
-					cv.line(frame, p1, p2, (255, 0, 255), 3)
+					# cv.line(frame, p1, p2, (255, 0, 255), 3)
 					# getting the blinking ratio
 					eyes_aspect_ratio = self.blinking_ratio(mesh_points_3D)
 					# print(f"Blinking ratio : {ratio}")
@@ -534,8 +538,8 @@ class HeadGazeTracker(object):
 							           (0, 255, 0), 1, cv.LINE_AA)
 							cv.putText(frame, f"Yaw: {int(yaw)}", (30, 140), cv.FONT_HERSHEY_TRIPLEX, 0.8, (0, 255, 0),
 							           1, cv.LINE_AA)
-							cv.putText(frame, f"Roll: {int(roll)}", (30, 170), cv.FONT_HERSHEY_TRIPLEX, 0.8, (0, 255, 0),
-							           1, cv.LINE_AA)
+							#cv.putText(frame, f"Roll: {int(roll)}", (30, 170), cv.FONT_HERSHEY_TRIPLEX, 0.8, (0, 255, 0),
+							           #1, cv.LINE_AA)
 
 				# Displaying the processed frame
 				cv.imshow("Eye Tracking", frame)
