@@ -1,33 +1,12 @@
 
-# Python-Gaze-Face-Tracker
-
-### Advanced Real-Time Eye, Facial Landmark, Head Pose, Gaze Direction Tracking System
-
----
-![image](https://github.com/alireza787b/Python-Gaze-Face-Tracker/assets/30341941/08db0391-c13f-4252-9a88-9d32b77181b9)
-![image](https://github.com/alireza787b/Python-Gaze-Face-Tracker/assets/30341941/8ad43aa9-dd3f-48b5-9e61-e375bc1db70f)
-
-
-<img src="https://github.com/alireza787b/Python-Gaze-Face-Tracker/assets/30341941/0e4b8068-9d80-4573-b5e7-2a2a6061c594" style="text-align:center">
-
-![image](https://github.com/alireza787b/Python-Gaze-Face-Tracker/assets/30341941/ce20ac3a-6785-448e-85df-4d2dd5f22040)
-
-## Description
-**Python-Gaze-Face-Tracker**  is a Python-based application designed for advanced real-time eye tracking, facial landmark detection, and head position (orientation) estimator and gaze estimation using OpenCV and MediaPipe technology. Specializing in uncalibrated gaze tracking and head orientation analysis this tool is an easy-to-use Python eye and facial landmark tracker. It excels in visualizing iris positions and offers robust logging capabilities for both eye and facial landmark data. Equipped with the ability to transmit this iris and gaze information over UDP sockets, Python-Gaze-Face-Tracker stands out for various applications, including aviation, human-computer interaction (HCI), and augmented reality (AR). The tool also includes a blink detection feature, contributing to detailed eye movement analysis and supporting head tracking. This makes it a comprehensive package for advanced gaze tracking and facial feature analysis in interactive technology applications.
-
-
-
----
-
 ## Features
 - **Real-Time Eye Tracking**: Tracks and visualizes iris and eye corner positions in real-time using webcam input.
-- **Facial Landmark Detection**: Detects and displays up to 468 facial landmarks.
-- **Data Logging**: Records tracking data to CSV files, including timestamps, eye positions, and optional facial landmark data. *Note: Enabling logging of all 468 facial landmarks can result in large log files.*
+- **Facial Landmark Detection**: Detects and displays up to 478 facial landmarks.
+- **Data Logging**: Records tracking data to CSV files, including timestamps, eye positions, and optional facial landmark data. *Note: Enabling logging of all 478 facial landmarks can result in large log files.*
 - **Socket Communication**: Supports transmitting only iris tracking data via UDP sockets for integration with other systems or applications.
 - **Blink Detection**: Monitors and records blink frequency, enhancing eye movement analysis.
 - **Real-Time Head Pose Estimation**: Accurately estimates the roll, pitch, and yaw of the user's head in real-time.
 - **Filtering and Smoothing**: Implements filtering and smoothing algorithms to ensure stable and accurate head orientation readings.
-- **Gaze Estimation**: Visualizes the direction of gaze by projecting a 3D point from the nose tip onto the 2D camera plane.
 - **Custom Real-Time Facial Landmark Visualization**: Utilize the `mediapipe_landmarks_test.py` script to visualize and track each of the MediaPipe facial landmark indices in real time. This feature is particularly useful for identifying the most relevant facial landmarks for your project and observing them directly in the video feed.
 
 ---
@@ -39,53 +18,32 @@
 - Other Python standard libraries: `math`, `socket`, `argparse`, `time`, `csv`, `datetime`, `os`
 
 ---
-## Tutorial Video
-🎥 **Watch the Setup and Usage Tutorial**: Discover how to install and use the Python-Gaze-Face-Tracker with our step-by-step video guide on YouTube: [Watch Tutorial](https://www.youtube.com/watch?v=UgC2GggTks0)
-
-This video tutorial will walk you through the installation process, demonstrate how to run the code, and show you the real-time tracking features in action.
-
-
----
 
 ## Installation & Usage
 
 1. **Clone the Repository:**
    ```
-   git clone https://github.com/alireza787b/Python-Gaze-Face-Tracker.git
+   git clone https://github.com/mxschlz/head_gaze_tracking.git
    ```
 
 2. **Navigate to the Repository Directory:**
    ```
-   cd Python-Gaze-Face-Tracker
+   cd head_gaze_tracking
    ```
 
-3. **Install Dependencies:**
+3. **Install anaconda environment:**
    ```
-   pip install -r requirements.txt
+   conda env create -f environment.yml
    ```
 
 4. **Run the Application:**
    ```
-   python main.py
+   python retriev_head_gaze_data.py
    ```
-
-   Optionally, specify the camera source:
-   ```
-   python main.py -c <camera_source_number>
-   ```
-
-5. **Open in VS Code:**
-   ```
-   code .
-   ```
-      Optionally, open the project in VS Code:
-
-
-
 
 ---
 
-## Parameters
+## Config.py
 - **USER_FACE_WIDTH**: The horizontal distance between the outer edges of the user's cheekbones in millimeters. Adjust this value based on your face width for accurate head pose estimation.
 - **NOSE_TO_CAMERA_DISTANCE**: The distance from the tip of the nose to the camera lens in millimeters. Intended for future enhancements.
 - **PRINT_DATA**: Enable or disable console data printing for debugging.
@@ -149,18 +107,3 @@ While running the Eye Tracking and Head Pose Estimation script, you can interact
   - Left Iris Relative Pos Dx: 66
   - Left Iris Relative Pos Dy: -3
   - Packet: [1623447890123, 315, 225, 66, -3]
-  
-
-
----
-
-## Acknowledgements
-This project was initially inspired by [Asadullah Dal's iris segmentation project](https://github.com/Asadullah-Dal17/iris-Segmentation-mediapipe-python).
-The blink detection and gaze direction visualization feature is also contributed by Asadullah Dal.
-
----
-
-## Note
-The **Python-Gaze-Face-Tracker** is intended for educational and research purposes and is particularly suited for applications in aviation, HCI, AR, and similar fields.
-
----
