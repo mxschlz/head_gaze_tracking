@@ -7,7 +7,7 @@
 # USER_FACE_WIDTH: The horizontal distance between the outer edges of the user's cheekbones in millimeters.
 # This measurement is used to scale the 3D model points for head pose estimation.
 # Measure your face width and adjust the value accordingly.
-USER_FACE_WIDTH: 140  # [mm]
+USER_FACE_WIDTH: 150  # [mm]
 USE_ATTENTION_MESH: True
 ## Camera Parameters (not currently used in calculations)
 # NOSE_TO_CAMERA_DISTANCE: The distance from the tip of the nose to the camera lens in millimeters.
