@@ -64,3 +64,5 @@ LEFT_MOUTH_CORNER: 291
 _indices_pose: [1, 33, 61, 199, 263, 291]
 MAX_NUM_FACES: 1
 TIMESTAMP_FORMAT: '%Y%m%d%H%M%S%f'
+# Rotate the video frame if needed
+ROTATE: 90
