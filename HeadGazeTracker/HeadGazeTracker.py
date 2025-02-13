@@ -257,9 +257,11 @@ class HeadGazeTracker(object):
 				return  # Exit if webcam can't be opened
 		else:
 			raise ValueError("Please provide video or enable webcam input!")
+
 		return cap
 
 	def init_video_output(self):
+		os.makedirs(os.path.dirname(self.VIDEO_OUTPUT), exist_ok=True)  # Create if doesn't exist
 		return cv.VideoWriter(self.VIDEO_OUTPUT, cv.VideoWriter_fourcc(*'XVID'), self.cap.get(cv.CAP_PROP_FPS),
 		                     (int(self.cap.get(3)), int(self.cap.get(4))))
 
@@ -317,6 +319,8 @@ class HeadGazeTracker(object):
 				# I think we better not flip to correspond with real world... need to make sure later...
 				if self.FLIP_VIDEO:
 					frame = cv.flip(frame, 1)
+				if self.ROTATE == 90:
+					frame = cv.rotate(frame, cv.ROTATE_90_CLOCKWISE)
 				rgb_frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
 				img_h, img_w = frame.shape[:2]
 				results = self.face_mesh.process(rgb_frame)
