@@ -321,6 +321,11 @@ class HeadGazeTracker(object):
 					frame = cv.flip(frame, 1)
 				if self.ROTATE == 90:
 					frame = cv.rotate(frame, cv.ROTATE_90_CLOCKWISE)
+				elif self.ROTATE == 180:
+					frame = cv.rotate(frame, cv.ROTATE_180)
+				elif self.ROTATE == -90:
+					frame = cv.rotate(frame, cv.ROTATE_90_COUNTERCLOCKWISE)
+
 				rgb_frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
 				img_h, img_w = frame.shape[:2]
 				results = self.face_mesh.process(rgb_frame)
