@@ -7,7 +7,7 @@
 # USER_FACE_WIDTH: The horizontal distance between the outer edges of the user's cheekbones in millimeters.
 # This measurement is used to scale the 3D model points for head pose estimation.
 # Measure your face width and adjust the value accordingly.
-USER_FACE_WIDTH: 150  # [mm]
+USER_FACE_WIDTH: 200  # [mm]
 USE_ATTENTION_MESH: True
 ## Camera Parameters (not currently used in calculations)
 # NOSE_TO_CAMERA_DISTANCE: The distance from the tip of the nose to the camera lens in millimeters.
@@ -15,7 +15,7 @@ USE_ATTENTION_MESH: True
 NOSE_TO_CAMERA_DISTANCE: 600  # [mm]
 ## Configuration Parameters
 # PRINT_DATA: Enable or disable the printing of data to the console for debugging.
-PRINT_DATA: False
+PRINT_DATA: True
 FLIP_VIDEO: False  # this needs to be FALSE because only then are landmark indices correct
 # SHOW_ALL_FEATURES: If True, display all facial landmarks on the video feed.
 SHOW_ALL_FEATURES: True
@@ -41,8 +41,8 @@ BLINK_THRESHOLD: 0.51
 EYE_AR_CONSEC_FRAMES: 1
 ## MediaPipe Model Confidence Parameters
 # These thresholds determine how confidently the model must detect or track to consider the results valid.
-MIN_DETECTION_CONFIDENCE: 0.5  # I think these are the original values
-MIN_TRACKING_CONFIDENCE: 0.5
+MIN_DETECTION_CONFIDENCE: 0.01  # I think these are the original values
+MIN_TRACKING_CONFIDENCE: 0.01
 ## Angle Normalization Parameters
 # MOVING_AVERAGE_WINDOW: The number of frames over which to calculate the moving average for smoothing angles.
 MOVING_AVERAGE_WINDOW: 10
@@ -65,4 +65,45 @@ _indices_pose: [1, 33, 61, 199, 263, 291]
 MAX_NUM_FACES: 1
 TIMESTAMP_FORMAT: '%Y%m%d%H%M%S%f'
 # Rotate the video frame if needed
-ROTATE: 90
+ROTATE: 180
+# --- Video-based Trial Detection Parameters ---
+ENABLE_VIDEO_TRIAL_DETECTION: True  # Main switch for this feature
+ENABLE_EYE_GAZE_CHECK: True  # This switches from the old head-pose-only approach to a new combined method of head pose and gaze
+# Defines the ROI for stimulus detection on the VIDEO FRAME (after any flip/rotate)
+# [x_top_left, y_top_left, width, height]
+# YOU MUST DETERMINE THESE VALUES FOR YOUR VIDEO SETUP
+STIMULUS_ROI_COORDS: [820, 630, 300, 300] # Example: top-left 100x100 px square
+
+# Dynamic Brightness Baseline (more robust)
+ROI_BRIGHTNESS_BASELINE_FRAMES: 50   # Nr. of initial non-trial frames to establish baseline brightness
+ROI_BRIGHTNESS_THRESHOLD_FACTOR: 1.5 # Stimulus onset if ROI brightness > baseline * factor
+# OR, if you prefer an absolute threshold (less robust):
+# ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD: 180 # (0-255) - comment out if using a factor
+
+STIMULUS_DURATION_MS: 800             # How long stimulus is considered "on" after detection
+POST_STIMULUS_TRIAL_DURATION_MS: 0  # How long a trial continues after stimulus duration
+MIN_INTER_TRIAL_INTERVAL_MS: 1000      # Min time from one trial's end to the next potential start
+
+# --- Gaze on Stimulus Parameters (these might already exist or be similar) ---
+# Define where the baby should look (in terms of calibrated head pose)
+
+STIMULUS_PITCH_RANGE: [-15, 15]  # [min_pitch, max_pitch] degrees from calibrated neutral
+STIMULUS_YAW_RANGE: [-15, 15]    # [min_yaw, max_yaw] degrees from calibrated neutral
+
+# TODO: determine this empirically
+STIMULUS_LEFT_IRIS_DX_RANGE: [-20, 20]
+STIMULUS_LEFT_IRIS_DY_RANGE: [-20, 20]
+STIMULUS_RIGHT_IRIS_DX_RANGE: [-20, 20]
+STIMULUS_RIGHT_IRIS_DY_RANGE: [-20, 20]
+
+ENABLE_HEAD_POSE_FILTER_FOR_EYE_GAZE: True
+
+HEAD_POSE_FILTER_PITCH_RANGE: [-15, 15]
+HEAD_POSE_FILTER_YAW_RANGE: [-15, 15]
+
+# Min % of STIMULUS_DURATION_MS gaze must be on stimulus area for trial to be '1'
+LOOK_TO_STIMULUS_THRESHOLD_PERCENT: 25
+
+# --- Output ---
+OUTPUT_TRIAL_SUMMARY_FILENAME_PREFIX: "baby_gaze_trial_summary_"
+OUTPUT_VIDEO_FOURCC: "XVID"  # Examples: "mp4v" (for .mp4), "XVID" (for .avi), "MJPG"
