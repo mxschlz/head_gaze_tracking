@@ -34,7 +34,7 @@ class HeadGazeTracker(object):
 		self.TOTAL_BLINKS = 0  # This will be reset if video is split
 
 		# Store the base VIDEO_OUTPUT path from config. Actual output path will be derived.
-		self.VIDEO_OUTPUT_BASE = getattr(self, 'VIDEO_OUTPUT', None)  # Get from loaded config
+		self.VIDEO_OUTPUT_BASE = VIDEO_OUTPUT
 		self.VIDEO_INPUT = VIDEO_INPUT  # Passed directly
 		self.TRACKING_DATA_LOG_FOLDER = TRACKING_DATA_LOG_FOLDER  # Passed directly
 		self.WEBCAM = WEBCAM  # Passed directly
@@ -82,6 +82,19 @@ class HeadGazeTracker(object):
 		self.angle_buffer = AngleBuffer(size=self.MOVING_AVERAGE_WINDOW)  # Reset per part
 
 		self._reset_per_frame_state()
+
+		# Head Pose Auto-Calibration Attributes
+		self.head_pose_calibration_samples = {'pitch': [], 'yaw': [], 'roll': []}
+		self.head_pose_calibration_frame_counter = 0
+		# self.auto_calibrate_pending is already loaded from config (AUTO_CALIBRATE_ON_START)
+		# self.calibrated is already initialized
+
+		# Ensure default values if not in config for these new params
+		self.HEAD_POSE_AUTO_CALIBRATION_ENABLED = getattr(self, "HEAD_POSE_AUTO_CALIBRATION_ENABLED", False)
+		self.HEAD_POSE_AUTO_CALIB_DURATION_FRAMES = getattr(self, "HEAD_POSE_AUTO_CALIB_DURATION_FRAMES", 150)
+		self.HEAD_POSE_AUTO_CALIB_MIN_SAMPLES = getattr(self, "HEAD_POSE_AUTO_CALIB_MIN_SAMPLES", 30)
+		self.HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE = getattr(self, "HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE", [-7, 7])
+		self.HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE = getattr(self, "HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE", [-7, 7])
 
 	def _reset_per_frame_state(self):
 		"""Resets variables that store state for the current frame."""
@@ -359,28 +372,69 @@ class HeadGazeTracker(object):
 				self.TOTAL_BLINKS += 1
 			self.EYES_BLINK_FRAME_COUNTER = 0
 
-	def _process_head_pose(self, mesh_points, img_h, img_w, key_pressed):  # Removed angle_buffer from args
+	def _process_head_pose(self, mesh_points, img_h, img_w, key_pressed):
 		self.raw_head_pitch, self.raw_head_yaw, self.raw_head_roll = self.estimate_head_pose(mesh_points,
 		                                                                                     (img_h, img_w))
-		self.angle_buffer.add([self.raw_head_pitch, self.raw_head_yaw, self.raw_head_roll])  # Use self.angle_buffer
+		self.angle_buffer.add([self.raw_head_pitch, self.raw_head_yaw, self.raw_head_roll])
 		self.smooth_pitch, self.smooth_yaw, self.smooth_roll = self.angle_buffer.get_average()
 
-		if self.auto_calibrate_pending and self.initial_pitch is None:
-			self.initial_pitch, self.initial_yaw, self.initial_roll = self.smooth_pitch, self.smooth_yaw, self.smooth_roll
-			self.calibrated = True
-			self.auto_calibrate_pending = False
-			if self.PRINT_DATA: print("Head pose auto-calibrated (initial).")
+		# --- New Automatic Head Pose Calibration Logic ---
+		if self.HEAD_POSE_AUTO_CALIBRATION_ENABLED and self.auto_calibrate_pending and not self.calibrated:
+			self.head_pose_calibration_frame_counter += 1
 
+			# Check if eyes are looking relatively forward
+			# self.l_dx, self.l_dy etc. should be populated by _extract_eye_features before this
+			eye_dx_ok = (self.HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE[0] <= self.l_dx <=
+			             self.HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE[1] and
+			             self.HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE[0] <= self.r_dx <=
+			             self.HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE[1])
+			eye_dy_ok = (self.HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE[0] <= self.l_dy <=
+			             self.HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE[1] and
+			             self.HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE[0] <= self.r_dy <=
+			             self.HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE[1])
+
+			if eye_dx_ok and eye_dy_ok:
+				self.head_pose_calibration_samples['pitch'].append(self.smooth_pitch)
+				self.head_pose_calibration_samples['yaw'].append(self.smooth_yaw)
+				self.head_pose_calibration_samples['roll'].append(self.smooth_roll)
+				if self.PRINT_DATA and self.frame_count % 15 == 0:  # Occasional print
+					print(
+						f"HP Calib sample: P={self.smooth_pitch:.1f} Y={self.smooth_yaw:.1f}. N={len(self.head_pose_calibration_samples['pitch'])}")
+
+			# Check if calibration period is over or enough samples collected
+			if self.head_pose_calibration_frame_counter >= self.HEAD_POSE_AUTO_CALIB_DURATION_FRAMES:
+				if len(self.head_pose_calibration_samples['pitch']) >= self.HEAD_POSE_AUTO_CALIB_MIN_SAMPLES:
+					self.initial_pitch = np.mean(self.head_pose_calibration_samples['pitch'])
+					self.initial_yaw = np.mean(self.head_pose_calibration_samples['yaw'])
+					self.initial_roll = np.mean(self.head_pose_calibration_samples['roll'])
+					self.calibrated = True
+					self.auto_calibrate_pending = False  # Stop trying to auto-calibrate
+					if self.PRINT_DATA:
+						print(
+							f"Head pose auto-calibrated using {len(self.head_pose_calibration_samples['pitch'])} samples.")
+						print(
+							f"Initial Pose: P={self.initial_pitch:.1f}, Y={self.initial_yaw:.1f}, R={self.initial_roll:.1f}")
+				else:
+					if self.PRINT_DATA:
+						print(
+							f"Head pose auto-calibration failed: Not enough suitable samples ({len(self.head_pose_calibration_samples['pitch'])} collected). Manual calibration ('c') may be needed.")
+					self.auto_calibrate_pending = False  # Stop trying to auto-calibrate to prevent repeated messages
+		# --- End of New Automatic Head Pose Calibration Logic ---
+
+		# Manual calibration by key press (overrides auto-calibration)
 		if key_pressed == ord('c'):
 			self.initial_pitch, self.initial_yaw, self.initial_roll = self.smooth_pitch, self.smooth_yaw, self.smooth_roll
 			self.calibrated = True
-			if self.PRINT_DATA: print("Head pose recalibrated by user.")
+			self.auto_calibrate_pending = False  # Manual calibration also means we stop pending auto-calib
+			if self.PRINT_DATA: print(
+				f"Head pose recalibrated by user: P={self.initial_pitch:.1f}, Y={self.initial_yaw:.1f}, R={self.initial_roll:.1f}")
 
 		if self.calibrated:
 			self.adj_pitch = self.smooth_pitch - self.initial_pitch
 			self.adj_yaw = self.smooth_yaw - self.initial_yaw
 			self.adj_roll = self.smooth_roll - self.initial_roll
 		else:
+			# If not calibrated (either auto failed or disabled, and 'c' not pressed), use raw smoothed values
 			self.adj_pitch, self.adj_yaw, self.adj_roll = self.smooth_pitch, self.smooth_yaw, self.smooth_roll
 
 	def _get_face_looks_text(self):
@@ -539,43 +593,43 @@ class HeadGazeTracker(object):
 		font_scale_small = 0.45
 		font_thickness = 1
 		line_h = 22
-		text_color_green = (0, 255, 0);
-		text_color_orange = (0, 165, 255);
+		text_color_green = (0, 255, 0)
+		text_color_orange = (0, 165, 255)
 		text_color_red = (0, 0, 255)
-		text_color_magenta = (255, 0, 255);
+		text_color_magenta = (255, 0, 255)
 		text_color_cyan = (255, 255, 0)
 
 		# Top-left column
 		tl_x, y_pos = 10, 20
 		# Display current part number
 		cv.putText(frame, f"Part: {self.current_video_part}", (tl_x, y_pos), font_face, font_scale_small,
-		           text_color_orange, font_thickness);
+		           text_color_orange, font_thickness)
 		y_pos += line_h - 5
 
 		cv.putText(frame, f"Blinks: {self.TOTAL_BLINKS}", (tl_x, y_pos), font_face, font_scale_main, text_color_green,
-		           font_thickness);
+		           font_thickness)
 		y_pos += line_h
 		if self.ENABLE_HEAD_POSE:
 			# ... (rest of head pose display, unchanged)
 			if self.calibrated:
 				cv.putText(frame, f"Cal Pitch: {self.adj_pitch:.1f}", (tl_x, y_pos), font_face, font_scale_main,
-				           text_color_green, font_thickness);
+				           text_color_green, font_thickness)
 				y_pos += line_h
 				cv.putText(frame, f"Cal Yaw: {self.adj_yaw:.1f}", (tl_x, y_pos), font_face, font_scale_main,
-				           text_color_green, font_thickness);
+				           text_color_green, font_thickness)
 				y_pos += line_h
 				cv.putText(frame, f"Cal Roll: {self.adj_roll:.1f}", (tl_x, y_pos), font_face, font_scale_main,
-				           text_color_green, font_thickness);
+				           text_color_green, font_thickness)
 				y_pos += line_h
 			else:
 				cv.putText(frame, f"Raw Pitch: {self.smooth_pitch:.1f}", (tl_x, y_pos), font_face, font_scale_main,
-				           text_color_orange, font_thickness);
+				           text_color_orange, font_thickness)
 				y_pos += line_h
 				cv.putText(frame, f"Raw Yaw: {self.smooth_yaw:.1f}", (tl_x, y_pos), font_face, font_scale_main,
-				           text_color_orange, font_thickness);
+				           text_color_orange, font_thickness)
 				y_pos += line_h
 				cv.putText(frame, f"Raw Roll: {self.smooth_roll:.1f}", (tl_x, y_pos), font_face, font_scale_main,
-				           text_color_orange, font_thickness);
+				           text_color_orange, font_thickness)
 				y_pos += line_h
 				status_text = ""
 				if not (results_face_mesh and results_face_mesh.multi_face_landmarks):
@@ -597,13 +651,13 @@ class HeadGazeTracker(object):
 				f" (Stim: {stim_t_left:.1f}s)" if stim_t_left > 0 else f" (Post: {trial_t_left:.1f}s)")
 			(w, _), _ = cv.getTextSize(trial_text, font_face, font_scale_main, font_thickness)
 			cv.putText(frame, trial_text, (tr_x_anchor - w, tr_y_pos), font_face, font_scale_main, text_color_magenta,
-			           font_thickness);
+			           font_thickness)
 			tr_y_pos += line_h
 
 		if self.face_looks_display_text:
 			(w, _), _ = cv.getTextSize(self.face_looks_display_text, font_face, font_scale_main, font_thickness)
 			cv.putText(frame, self.face_looks_display_text, (tr_x_anchor - w, tr_y_pos), font_face, font_scale_main,
-			           text_color_green, font_thickness);
+			           text_color_green, font_thickness)
 			tr_y_pos += line_h
 
 		if self.ENABLE_VIDEO_TRIAL_DETECTION:  # ROI Box and Text
@@ -613,7 +667,7 @@ class HeadGazeTracker(object):
 			roi_text = f"ROI: {self.current_roi_brightness:.1f} (Base: {roi_base})"
 			(w, _), _ = cv.getTextSize(roi_text, font_face, font_scale_small, font_thickness)
 			cv.putText(frame, roi_text, (tr_x_anchor - w, tr_y_pos), font_face, font_scale_small, text_color_cyan,
-			           font_thickness);
+			           font_thickness)
 			tr_y_pos += line_h
 
 		if results_face_mesh and results_face_mesh.multi_face_landmarks:
@@ -622,17 +676,17 @@ class HeadGazeTracker(object):
 				r_eye_text = f"R Eye D(xy): ({self.r_dx:.1f}, {self.r_dy:.1f})"
 				(w, _), _ = cv.getTextSize(l_eye_text, font_face, font_scale_small, font_thickness)
 				cv.putText(frame, l_eye_text, (tr_x_anchor - w, tr_y_pos), font_face, font_scale_small, text_color_cyan,
-				           font_thickness);
+				           font_thickness)
 				tr_y_pos += int(line_h * 0.8)
 				(w, _), _ = cv.getTextSize(r_eye_text, font_face, font_scale_small, font_thickness)
 				cv.putText(frame, r_eye_text, (tr_x_anchor - w, tr_y_pos), font_face, font_scale_small, text_color_cyan,
-				           font_thickness);
+				           font_thickness)
 				tr_y_pos += int(line_h * 0.8)
 			if self.is_looking_down_explicitly:
 				down_text = "Eyes: Explicitly Down"
 				(w, _), _ = cv.getTextSize(down_text, font_face, font_scale_small, font_thickness)
 				cv.putText(frame, down_text, (tr_x_anchor - w, tr_y_pos), font_face, font_scale_small,
-				           text_color_orange, font_thickness);
+				           text_color_orange, font_thickness)
 				tr_y_pos += int(line_h * 0.8)
 
 		if self.gaze_on_stimulus_display_text:
