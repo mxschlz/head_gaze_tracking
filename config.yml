@@ -7,7 +7,7 @@
 # USER_FACE_WIDTH: The horizontal distance between the outer edges of the user's cheekbones in millimeters.
 # This measurement is used to scale the 3D model points for head pose estimation.
 # Measure your face width and adjust the value accordingly.
-USER_FACE_WIDTH: 200  # [mm]
+USER_FACE_WIDTH: 150  # [mm]
 USE_ATTENTION_MESH: True
 ## Camera Parameters (not currently used in calculations)
 # NOSE_TO_CAMERA_DISTANCE: The distance from the tip of the nose to the camera lens in millimeters.
@@ -69,6 +69,8 @@ ROTATE: 180
 # --- Video-based Trial Detection Parameters ---
 ENABLE_VIDEO_TRIAL_DETECTION: True  # Main switch for this feature
 ENABLE_EYE_GAZE_CHECK: True  # This switches from the old head-pose-only approach to a new combined method of head pose and gaze
+AUTO_CALIBRATE_ON_START: True  # auto-calibrate head position on start
+ENABLE_HEAD_POSE_FILTER_FOR_EYE_GAZE: True  # if True, also uses head position besides eye gaze for stimulus-gaze categorization
 # Defines the ROI for stimulus detection on the VIDEO FRAME (after any flip/rotate)
 # [x_top_left, y_top_left, width, height]
 # YOU MUST DETERMINE THESE VALUES FOR YOUR VIDEO SETUP
@@ -86,24 +88,35 @@ MIN_INTER_TRIAL_INTERVAL_MS: 1000      # Min time from one trial's end to the ne
 
 # --- Gaze on Stimulus Parameters (these might already exist or be similar) ---
 # Define where the baby should look (in terms of calibrated head pose)
+STIMULUS_PITCH_RANGE: [-10, 10]  # [min_pitch, max_pitch] degrees from calibrated neutral
+STIMULUS_YAW_RANGE: [-10, 10]    # [min_yaw, max_yaw] degrees from calibrated neutral
 
-STIMULUS_PITCH_RANGE: [-15, 15]  # [min_pitch, max_pitch] degrees from calibrated neutral
-STIMULUS_YAW_RANGE: [-15, 15]    # [min_yaw, max_yaw] degrees from calibrated neutral
+STIMULUS_LEFT_IRIS_DX_RANGE: [-20, -10]  # pixel values from neutral
+STIMULUS_LEFT_IRIS_DY_RANGE: [0, 5]  # pixel values from neutral
+STIMULUS_RIGHT_IRIS_DX_RANGE: [10, 20]  # pixel values from neutral
+STIMULUS_RIGHT_IRIS_DY_RANGE: [-5, 0]  # pixel values from neutral
 
-# TODO: determine this empirically
-STIMULUS_LEFT_IRIS_DX_RANGE: [-20, 20]
-STIMULUS_LEFT_IRIS_DY_RANGE: [-20, 20]
-STIMULUS_RIGHT_IRIS_DX_RANGE: [-20, 20]
-STIMULUS_RIGHT_IRIS_DY_RANGE: [-20, 20]
+# Head Pose Auto-Calibration Settings
+HEAD_POSE_AUTO_CALIBRATION_ENABLED: True  # Master switch for this feature
+HEAD_POSE_AUTO_CALIB_DURATION_FRAMES: 150 # How many frames to attempt calibration (e.g., 5s @ 30fps)
+HEAD_POSE_AUTO_CALIB_MIN_SAMPLES: 30      # Min number of "good" samples needed within the duration
+# Eye gaze dx/dy ranges (pixels, relative to eye corner) to consider eyes "looking forward" for calibration
+HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE: [-20, 20] # Allowable horizontal deviation of iris center from eye corner
+HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE: [-20, 20] # Allowable vertical deviation of iris center from eye corner
 
-ENABLE_HEAD_POSE_FILTER_FOR_EYE_GAZE: True
-
+# Head Pose Filter Settings
 HEAD_POSE_FILTER_PITCH_RANGE: [-15, 15]
 HEAD_POSE_FILTER_YAW_RANGE: [-15, 15]
 
 # Min % of STIMULUS_DURATION_MS gaze must be on stimulus area for trial to be '1'
-LOOK_TO_STIMULUS_THRESHOLD_PERCENT: 25
+LOOK_TO_STIMULUS_THRESHOLD_PERCENT: 60
 
 # --- Output ---
-OUTPUT_TRIAL_SUMMARY_FILENAME_PREFIX: "baby_gaze_trial_summary_"
+OUTPUT_TRIAL_SUMMARY_FILENAME_PREFIX: "baby_gaze_trial_summary"
 OUTPUT_VIDEO_FOURCC: "XVID"  # Examples: "mp4v" (for .mp4), "XVID" (for .avi), "MJPG"
+
+SPLIT_VIDEO_AT_MS: 655000  # cut video here (in ms)
+
+# Suffixes to append to output filenames for each part if splitting
+OUTPUT_FILENAME_SUFFIX_PART1: "_part1"
+OUTPUT_FILENAME_SUFFIX_PART2: "_part2"
