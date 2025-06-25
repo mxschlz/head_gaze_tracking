@@ -3,7 +3,7 @@ from sklearn.metrics import cohen_kappa_score, confusion_matrix
 import os
 
 
-def calculate_cohens_kappa(file_path1, file_path2, column_index1=0, column_index2=0):
+def calculate_cohens_kappa(file_path1, file_path2, column_index1=0, column_index2=0, labels=[1, 2]):
     """
     Calculates Cohen's Kappa and a summary of agreements/disagreements
     for two data files (CSV or Excel).
@@ -13,12 +13,18 @@ def calculate_cohens_kappa(file_path1, file_path2, column_index1=0, column_index
         file_path2 (str): Path to the second data file (e.g., rater 2).
         column_index1 (int): The index of the column to use for the first file.
         column_index2 (int): The index of the column to use for the second file.
+        labels (list, optional): The list of labels to compare. Must contain two values.
+                                 Defaults to [1, 2].
 
     Returns:
         tuple: (Cohen's Kappa score (float), summary_dict (dict)) or (None, None) if an error occurs.
                The summary_dict contains counts of agreements and disagreements.
     """
     try:
+        if len(labels) != 2:
+            print("Error: The 'labels' parameter must contain exactly two values.")
+            return None, None
+
         rater_data_list = []
         # Use a tuple to associate files with their respective column indices
         files_and_cols = [(file_path1, column_index1), (file_path2, column_index2)]
@@ -51,28 +57,31 @@ def calculate_cohens_kappa(file_path1, file_path2, column_index1=0, column_index
             print("Error: Files are empty or the specified column could not be read.")
             return None, None
 
-        kappa = cohen_kappa_score(rater1_data, rater2_data)
+        kappa = cohen_kappa_score(rater1_data, rater2_data, labels=labels)
 
-        cm = confusion_matrix(rater1_data, rater2_data, labels=[0, 1])
+        cm = confusion_matrix(rater1_data, rater2_data, labels=labels)
 
-        both_0 = int(cm[0, 0])
-        rater1_0_rater2_1 = int(cm[0, 1])
-        rater1_1_rater2_0 = int(cm[1, 0])
-        both_1 = int(cm[1, 1])
+        # Unpack the confusion matrix based on the provided labels
+        label1, label2 = labels[0], labels[1]
+
+        agreement_both_l1 = int(cm[0, 0])
+        disagreement_r1_l1_r2_l2 = int(cm[0, 1])
+        disagreement_r1_l2_r2_l1 = int(cm[1, 0])
+        agreement_both_l2 = int(cm[1, 1])
 
         total_observations = len(rater1_data)
-        observed_agreement_count = both_0 + both_1
+        observed_agreement_count = agreement_both_l1 + agreement_both_l2
         observed_agreement_proportion = observed_agreement_count / total_observations if total_observations > 0 else 0
 
         summary = {
             "cohen_kappa": kappa,
             "total_observations": total_observations,
-            "agreement_both_0": both_0,
-            "agreement_both_1": both_1,
-            "disagreement_rater1_0_rater2_1": rater1_0_rater2_1,
-            "disagreement_rater1_1_rater2_0": rater1_1_rater2_0,
+            f"agreement_both_{label1}": agreement_both_l1,
+            f"agreement_both_{label2}": agreement_both_l2,
+            f"disagreement_rater1_{label1}_rater2_{label2}": disagreement_r1_l1_r2_l2,
+            f"disagreement_rater1_{label2}_rater2_{label1}": disagreement_r1_l2_r2_l1,
             "total_agreements": observed_agreement_count,
-            "total_disagreements": rater1_0_rater2_1 + rater1_1_rater2_0,
+            "total_disagreements": disagreement_r1_l1_r2_l2 + disagreement_r1_l2_r2_l1,
             "observed_agreement_proportion": observed_agreement_proportion,
         }
 
@@ -100,11 +109,15 @@ if __name__ == "__main__":
     # NOTE: Adjust column indices as needed.
     # For the generated summary, 'looked_at_stimulus' is the 7th column (index 6).
     # For the human-coded Excel file, it might be a different column.
+
+    # The function now defaults to comparing labels [1, 2].
+    # You can override this by passing the `labels` argument, e.g., labels=[0, 1].
     kappa_result, summary_details = calculate_cohens_kappa(
         file_path1,
         file_path2,
-        column_index1=0, # Example: 1st column for the Excel file
-        column_index2=6  # 7th column for the generated CSV
+        column_index1=0,  # Example: 1st column for the Excel file
+        column_index2=6,  # 7th column for the generated CSV
+        labels=[1, 2]      # Explicitly comparing labels 1 and 2
     )
 
     if kappa_result is not None and summary_details is not None:
