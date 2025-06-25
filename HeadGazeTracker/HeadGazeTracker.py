@@ -76,6 +76,7 @@ class HeadGazeTracker(object):
 			self.last_trial_end_time_ms = -self.MIN_INTER_TRIAL_INTERVAL_MS  # Reset per part
 			self.roi_brightness_samples = []  # Reset per part
 			self.roi_baseline_brightness = None  # Reset per part
+			self.last_trial_result_text = ""  # To hold the result of the last completed trial for display
 			self._validate_trial_detection_config()
 
 		self.auto_calibrate_pending = getattr(self, "AUTO_CALIBRATE_ON_START", True)
@@ -489,7 +490,7 @@ class HeadGazeTracker(object):
 				'id': self.trial_counter, 'start_time_ms': start_t,
 				'stimulus_end_time_ms': stim_end_t, 'trial_end_time_ms': trial_end_t,
 				'active': True, 'stimulus_frames_processed_gaze': 0,
-				'frames_on_stimulus_area': 0, 'looked_final': 0}
+				'frames_on_stimulus_area': 0, 'looked_final': 2}
 			if self.PRINT_DATA: print(
 				f"Trial {self.trial_counter} START @{start_t}ms (Part {self.current_video_part}). ROI Bright: {self.current_roi_brightness:.2f}")
 
@@ -502,6 +503,14 @@ class HeadGazeTracker(object):
 					        self.current_trial_data['stimulus_frames_processed_gaze']) * 100
 					if perc >= self.LOOK_TO_STIMULUS_THRESHOLD_PERCENT:
 						self.current_trial_data['looked_final'] = 1
+
+				# Set text for display based on final classification
+				trial_id = self.current_trial_data['id']
+				if self.current_trial_data['looked_final'] == 1:
+					self.last_trial_result_text = f"Trial {trial_id} Result: Looked (1)"
+				else:  # It's 2
+					self.last_trial_result_text = f"Trial {trial_id} Result: Away (2)"
+
 				self.all_trials_summary.append(self.current_trial_data.copy())
 				self.last_trial_end_time_ms = self.current_trial_data['trial_end_time_ms']
 				self.current_trial_data = None
@@ -598,6 +607,7 @@ class HeadGazeTracker(object):
 		text_color_red = (0, 0, 255)
 		text_color_magenta = (255, 0, 255)
 		text_color_cyan = (255, 255, 0)
+		text_color_yellow = (0, 255, 255)  # For trial result
 
 		# Top-left column
 		tl_x, y_pos = 10, 20
@@ -643,6 +653,14 @@ class HeadGazeTracker(object):
 
 		# Top-right column
 		tr_y_pos, tr_x_anchor = 20, img_w - 10
+
+		# Display the result of the last completed trial
+		if self.ENABLE_VIDEO_TRIAL_DETECTION and self.last_trial_result_text:
+			(w, _), _ = cv.getTextSize(self.last_trial_result_text, font_face, font_scale_main, font_thickness)
+			cv.putText(frame, self.last_trial_result_text, (tr_x_anchor - w, tr_y_pos), font_face, font_scale_main,
+			           text_color_yellow, font_thickness)
+			tr_y_pos += line_h
+
 		if self.ENABLE_VIDEO_TRIAL_DETECTION and self.current_trial_data and self.current_trial_data['active']:
 			trial_id = self.current_trial_data['id']
 			stim_t_left = (self.current_trial_data['stimulus_end_time_ms'] - current_frame_time_ms) / 1000.0
@@ -759,6 +777,8 @@ class HeadGazeTracker(object):
 		self.last_trial_end_time_ms = split_time_ms_absolute - self.MIN_INTER_TRIAL_INTERVAL_MS
 		self.roi_brightness_samples = []
 		self.roi_baseline_brightness = None
+		if hasattr(self, 'last_trial_result_text'):
+			self.last_trial_result_text = ""
 
 		# Reset angle buffer for smoothing
 		self.angle_buffer = AngleBuffer(size=self.MOVING_AVERAGE_WINDOW)
