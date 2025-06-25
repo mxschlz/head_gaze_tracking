@@ -724,10 +724,10 @@ class HeadGazeTracker(object):
 				                          landmark_drawing_spec=drawing_spec,
 				                          connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_tesselation_style())
 			else:
-				if self.l_cx != 0 or self.l_cy != 0: cv.circle(frame, (self.l_cx, self.l_cy), 5, (255, 0, 255), -1,
-				                                               cv.LINE_AA)
-				if self.r_cx != 0 or self.r_cy != 0: cv.circle(frame, (self.r_cx, self.r_cy), 5, (255, 0, 255), -1,
-				                                               cv.LINE_AA)
+				if self.l_cx != 0 or self.l_cy != 0:
+					cv.circle(frame, (self.l_cx, self.l_cy), 2, (0, 255, 0), -1, cv.LINE_AA)
+				if self.r_cx != 0 or self.r_cy != 0:
+					cv.circle(frame, (self.r_cx, self.r_cy), 2, (0, 255, 0), -1, cv.LINE_AA)
 				if self.ENABLE_HEAD_POSE and hasattr(self, '_indices_pose') and self.mesh_points is not None:
 					for idx in self._indices_pose:
 						if 0 <= idx < len(self.mesh_points): cv.circle(frame, self.mesh_points[idx], 2, (0, 0, 255), -1,
