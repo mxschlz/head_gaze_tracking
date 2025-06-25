@@ -3,7 +3,7 @@ from HeadGazeTracker.HeadGazeTracker import HeadGazeTracker
 
 # setup
 subject = "SMS019_A"  # subject id
-video_input = f"/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/baby_vids/input/SMS019_A_Video.mkv"  # if webcam==None, use this variable as video input
+video_input = f"/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/baby_vids/input/{subject}_Video.mkv"  # if webcam==None, use this variable as video input
 webcam = None # can be 0 or None
 video_output = f"/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/baby_vids/output/{subject}_processed_video_output.mkv"
 tracking_data_log_folder = f"/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/baby_vids/logs/"
