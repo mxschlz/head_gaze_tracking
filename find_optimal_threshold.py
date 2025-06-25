@@ -40,7 +40,7 @@ def find_summary_file_for_run(log_folder, subject_id, part_suffix, run_start_tim
 	return latest_file
 
 
-def run_optimization(subject, video, truth, truth_col, output_folder, config, thresholds, part1_duration_ms):
+def run_optimization(subject, video, truth, truth_col, output_folder, config, thresholds, part1_duration_ms, labels):
 	"""
     Main function to loop through thresholds, run the tracker, and calculate reliability.
     This function now explicitly controls the video processing duration.
@@ -116,7 +116,8 @@ def run_optimization(subject, video, truth, truth_col, output_folder, config, th
 			file_path1=truth,
 			file_path2=generated_file,
 			column_index1=truth_col,
-			column_index2=GENERATED_DATA_COLUMN_INDEX
+			column_index2=GENERATED_DATA_COLUMN_INDEX,
+			labels=labels
 		)
 		if kappa is not None and summary is not None:
 			print(f"Result for {threshold}% -> Cohen's Kappa: {kappa:.4f}")
@@ -200,7 +201,7 @@ def _plot_optimization_results(results_df, subject, output_folder):
 	print(f"\nSuccessfully saved plot to: {plot_filename}")
 
 
-def reanalyze_and_plot_from_logs(subject_id, log_folder, truth_file_path, truth_file_column_index, thresholds_tested):
+def reanalyze_and_plot_from_logs(subject_id, log_folder, truth_file_path, truth_file_column_index, thresholds_tested, labels):
 	"""
 	Re-analyzes existing raw summary files from a log folder by recalculating Kappa.
 
@@ -259,7 +260,8 @@ def reanalyze_and_plot_from_logs(subject_id, log_folder, truth_file_path, truth_
 			file_path1=truth_file_path,
 			file_path2=generated_file,
 			column_index1=truth_file_column_index,
-			column_index2=GENERATED_DATA_COLUMN_INDEX
+			column_index2=GENERATED_DATA_COLUMN_INDEX,
+			labels=labels
 		)
 		if kappa is not None and summary is not None:
 			print(f"  -> Result: Cohen's Kappa = {kappa:.4f}")
@@ -303,7 +305,7 @@ def main():
 
 	# --- Thresholds to Test ---
 	# This MUST match the thresholds used to generate the files in the log folder
-	THRESHOLDS_TO_TEST = list(range(25, 71, 5))  # e.g., 25, 30, 35, ..., 70
+	THRESHOLDS_TO_TEST = list(range(1, 33, 3))  # e.g., 25, 30, 35, ..., 70
 
 	# --- Subject and File Configuration ---
 	SUBJECT_ID = "SMS019_A"
@@ -315,6 +317,7 @@ def main():
 	TRUTH_FILE_PATH = os.path.join(INPUT_DIR, f"{SUBJECT_ID}_VideoCoding.xlsx")
 	TRUTH_FILE_COLUMN_INDEX = 0
 	BASE_CONFIG_FILE = "config.yml"
+	labels = [1, 2]  # coding scheme in the files
 
 	# --- KEY SETTING: Define the duration of "part1" in milliseconds ---
 	PART1_DURATION_MS = 655000
@@ -322,32 +325,34 @@ def main():
 	# ==================================================================
 	# ===                  END OF CONFIGURATION                    ===
 	# ==================================================================
-
+	"""
     # --- OPTION 1: Run the full optimization from video (Original) ---
-	# print("--- RUNNING FULL OPTIMIZATION ---")
-	# run_optimization(
-	# 	subject=SUBJECT_ID,
-	# 	video=VIDEO_PATH,
-	# 	truth=TRUTH_FILE_PATH,
-	# 	truth_col=TRUTH_FILE_COLUMN_INDEX,
-	# 	output_folder=OUTPUT_FOLDER,
-	# 	config=BASE_CONFIG_FILE,
-	# 	thresholds=THRESHOLDS_TO_TEST,
-	# 	part1_duration_ms=PART1_DURATION_MS
-	# )
-	# analyze_and_plot_results(
-	# 	subject=SUBJECT_ID,
-	# 	output_folder=OUTPUT_FOLDER
-	# )
+	print("--- RUNNING FULL OPTIMIZATION ---")
+	run_optimization(
+		subject=SUBJECT_ID,
+		video=VIDEO_PATH,
+		truth=TRUTH_FILE_PATH,
+		truth_col=TRUTH_FILE_COLUMN_INDEX,
+		output_folder=OUTPUT_FOLDER,
+		config=BASE_CONFIG_FILE,
+		thresholds=THRESHOLDS_TO_TEST,
+		part1_duration_ms=PART1_DURATION_MS,
+		labels=labels)
+	
+	analyze_and_plot_results(
+		subject=SUBJECT_ID,
+		output_folder=OUTPUT_FOLDER)
+	"""
 
-    # --- OPTION 2: Re-analyze existing log files (Your New Function) ---
+	# --- OPTION 2: Re-analyze existing log files (Your New Function) ---
 	print("\n--- RE-ANALYZING FROM EXISTING LOGS ---")
 	reanalyze_and_plot_from_logs(
 		subject_id=SUBJECT_ID,
 		log_folder=OUTPUT_FOLDER,
 		truth_file_path=TRUTH_FILE_PATH,
 		truth_file_column_index=TRUTH_FILE_COLUMN_INDEX,
-		thresholds_tested=THRESHOLDS_TO_TEST
+		thresholds_tested=THRESHOLDS_TO_TEST,
+		labels=labels
 	)
 
 
