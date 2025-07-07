@@ -6,6 +6,7 @@ import glob
 import yaml
 import pandas as pd
 import matplotlib.pyplot as plt
+import copy
 
 # Ensure the custom modules can be found
 project_root = os.path.dirname(os.path.abspath(__file__))
@@ -23,7 +24,7 @@ def find_summary_file_for_run(log_folder, subject_id, part_suffix, run_start_tim
 	# This pattern correctly looks for the first part's log file, which has no suffix.
 	search_pattern = os.path.join(
 		log_folder,
-		f"{subject_id}_baby_gaze_trial_summary{part_suffix}*.csv"
+		f"{subject_id}_trial_summary{part_suffix}*.csv"
 	)
 	files = glob.glob(search_pattern)
 	if not files:
@@ -65,17 +66,17 @@ def run_optimization(subject, video, truth, truth_col, output_folder, config, th
 		print(f"\n{'=' * 20} TESTING THRESHOLD: {threshold}% {'=' * 20}")
 
 		# 1. Modify and save the temporary config file
-		current_config = base_config.copy()
-		current_config['LOOK_TO_STIMULUS_THRESHOLD_PERCENT'] = threshold
+		# Use deepcopy to safely handle nested dictionaries
+		current_config = copy.deepcopy(base_config)
 
-		# --- KEY CHANGE: STOP PROCESSING AFTER PART 1 ---
-		# Disable the video splitting logic to prevent processing part 2.
-		# Setting this to None or 0 should disable the feature in the tracker.
-		current_config['SPLIT_VIDEO_AT_MS'] = part1_duration_ms
+		# --- CORRECTED LOGIC: Modify the nested keys, not the top-level ---
+		# This ensures the correct parameters are updated for the tracker.
+		current_config['Trials']['LOOK_TO_STIMULUS_THRESHOLD_PERCENT'] = threshold
+		current_config['Files']['SPLIT_VIDEO_AT_MS'] = part1_duration_ms
 
-		# Disable visual features for maximum speed
-		current_config['SHOW_ON_SCREEN_DATA'] = True # Set to False for max speed
-		current_config['VIDEO_OUTPUT'] = None
+		# Disable visual features for maximum speed, as intended by the original comment
+		current_config['System']['SHOW_ON_SCREEN_DATA'] = False
+		# --- END OF CORRECTION ---
 
 		with open(temp_config_path, 'w') as f:
 			yaml.dump(current_config, f)
@@ -89,7 +90,7 @@ def run_optimization(subject, video, truth, truth_col, output_folder, config, th
 				config_file_path=temp_config_path,
 				WEBCAM=None,
 				VIDEO_INPUT=video,
-				VIDEO_OUTPUT=None,
+				VIDEO_OUTPUT=None,  # Explicitly disable video output for speed
 				TRACKING_DATA_LOG_FOLDER=output_folder
 			)
 			tracker.run()
@@ -224,7 +225,7 @@ def reanalyze_and_plot_from_logs(subject_id, log_folder, truth_file_path, truth_
 	GENERATED_DATA_COLUMN_INDEX = 6
 
 	# 1. Find all raw summary files for the subject
-	search_pattern = os.path.join(log_folder, f"{subject_id}_baby_gaze_trial_summary*.csv")
+	search_pattern = os.path.join(log_folder, f"{subject_id}_trial_summary*.csv")
 	all_files = glob.glob(search_pattern)
 
 	# Exclude any aggregate summary files from the list of raw files
@@ -305,7 +306,7 @@ def main():
 
 	# --- Thresholds to Test ---
 	# This MUST match the thresholds used to generate the files in the log folder
-	THRESHOLDS_TO_TEST = list(range(1, 33, 3))  # e.g., 25, 30, 35, ..., 70
+	THRESHOLDS_TO_TEST = list(range(1, 90, 5))  # e.g., 25, 30, 35, ..., 70
 
 	# --- Subject and File Configuration ---
 	SUBJECT_ID = "SMS019_A"
