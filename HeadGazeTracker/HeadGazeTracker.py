@@ -9,6 +9,8 @@ from AngleBuffer import AngleBuffer
 import cv2 as cv
 import mediapipe as mp
 import yaml
+from sklearn.cluster import DBSCAN # Add this import at the top of the file
+
 
 # some good aesthetics
 mp_drawing = mp.solutions.drawing_utils
@@ -20,82 +22,117 @@ drawing_spec = mp_drawing.DrawingSpec(thickness=1, circle_radius=0)
 class HeadGazeTracker(object):
 	def __init__(self, subject_id=None, config_file_path="config.yaml", VIDEO_INPUT=None, VIDEO_OUTPUT=None, WEBCAM=0,
 	             TRACKING_DATA_LOG_FOLDER=None, starting_timestamp=None, total_frames=None):
+		# 1. Load all parameters from the YAML file into class attributes
 		self.load_config(file_path=config_file_path)
-		if not starting_timestamp:
-			self.starting_timestamp = datetime.now()
-		elif starting_timestamp:
-			self.starting_timestamp = datetime.strptime(str(starting_timestamp),
-			                                            self.TIMESTAMP_FORMAT)  # must be UTC time (YYYYMMDDHHMMSSUUUUUU)
-		if not total_frames:
-			self.total_frames = 0
-		elif total_frames:
-			self.total_frames = total_frames
+
+		# 2. Set up core attributes from arguments
 		self.subject_id = subject_id
-		self.TOTAL_BLINKS = 0  # This will be reset if video is split
-
-		# Store the base VIDEO_OUTPUT path from config. Actual output path will be derived.
+		self.VIDEO_INPUT = VIDEO_INPUT
 		self.VIDEO_OUTPUT_BASE = VIDEO_OUTPUT
-		self.VIDEO_INPUT = VIDEO_INPUT  # Passed directly
-		self.TRACKING_DATA_LOG_FOLDER = TRACKING_DATA_LOG_FOLDER  # Passed directly
-		self.WEBCAM = WEBCAM  # Passed directly
+		self.TRACKING_DATA_LOG_FOLDER = TRACKING_DATA_LOG_FOLDER
+		self.WEBCAM = WEBCAM
+		self.total_frames = total_frames or 0
 
-		self.initial_pitch, self.initial_yaw, self.initial_roll = None, None, None
-		self.calibrated = False  # Calibration persists across parts
-		self.SERVER_ADDRESS = (self.SERVER_IP, self.SERVER_PORT)
-		self.IS_RECORDING = False
-		self.EYES_BLINK_FRAME_COUNTER = 0
+		# 3. Set default values for any attributes that might be missing from the config
+		# This makes the class more robust.
+		# System & Performance
+		self.PRINT_DATA = getattr(self, "PRINT_DATA", True)
+		self.SHOW_ON_SCREEN_DATA = getattr(self, "SHOW_ON_SCREEN_DATA", True)
+		self.FRAME_SKIP = getattr(self, "FRAME_SKIP", 1)
+		self.USE_SOCKET = getattr(self, "USE_SOCKET", False)
+		self.SERVER_IP = getattr(self, "SERVER_IP", "127.0.0.1")
+		self.SERVER_PORT = getattr(self, "SERVER_PORT", 5005)
+
+		# Files & Logging
+		self.ROTATE = getattr(self, "ROTATE", 0)
+		self.FLIP_VIDEO = getattr(self, "FLIP_VIDEO", False)
+		self.split_at_ms = getattr(self, "SPLIT_VIDEO_AT_MS", None)
+		self.output_suffix_part1 = getattr(self, "OUTPUT_FILENAME_SUFFIX_PART1", "_part1")
+		self.output_suffix_part2 = getattr(self, "OUTPUT_FILENAME_SUFFIX_PART2", "_part2")
+		self.LOG_DATA = getattr(self, "LOG_DATA", True)
+		self.TIMESTAMP_FORMAT = getattr(self, "TIMESTAMP_FORMAT", "%Y%m%d%H%M%S%f")
+		self.LOG_ALL_FEATURES = getattr(self, "LOG_ALL_FEATURES", False)
+		self.LOG_Z_COORD = getattr(self, "LOG_Z_COORD", False)
+
+		# Features
+		self.MAX_NUM_FACES = getattr(self, "MAX_NUM_FACES", 1)
+		self.MIN_DETECTION_CONFIDENCE = getattr(self, "MIN_DETECTION_CONFIDENCE", 0.5)
+		self.MIN_TRACKING_CONFIDENCE = getattr(self, "MIN_TRACKING_CONFIDENCE", 0.5)
+		self.USE_ATTENTION_MESH = getattr(self, "USE_ATTENTION_MESH", True)
+		self.ENABLE_HEAD_POSE = getattr(self, "ENABLE_HEAD_POSE", True)
+		self.USER_FACE_WIDTH = getattr(self, "USER_FACE_WIDTH", 150.0)
+		self.MOVING_AVERAGE_WINDOW = getattr(self, "MOVING_AVERAGE_WINDOW", 10)
+		self.BLINK_THRESHOLD = getattr(self, "BLINK_THRESHOLD", 0.51)
+		self.EYE_AR_CONSEC_FRAMES = getattr(self, "EYE_AR_CONSEC_FRAMES", 1)
+		self.SHOW_ALL_FEATURES = getattr(self, "SHOW_ALL_FEATURES", False)
+
+		# Landmark Indices
+		self.LEFT_EYE_IRIS = getattr(self, "LEFT_EYE_IRIS", [474, 475, 476, 477])
+		self.RIGHT_EYE_IRIS = getattr(self, "RIGHT_EYE_IRIS", [469, 470, 471, 472])
+		self.RIGHT_EYE_POINTS = getattr(self, "RIGHT_EYE_POINTS", [33, 160, 159, 158, 133, 153, 145, 144])
+		self.LEFT_EYE_POINTS = getattr(self, "LEFT_EYE_POINTS", [362, 385, 386, 387, 263, 373, 374, 380])
+		self.RIGHT_EYE_OUTER_CORNER = getattr(self, "RIGHT_EYE_OUTER_CORNER", 33)
+		self.LEFT_EYE_OUTER_CORNER = getattr(self, "LEFT_EYE_OUTER_CORNER", 263)
+		self.NOSE_TIP_INDEX = getattr(self, "NOSE_TIP_INDEX", 4)
+		self.CHIN_INDEX = getattr(self, "CHIN_INDEX", 152)
+		self.RIGHT_MOUTH_CORNER = getattr(self, "RIGHT_MOUTH_CORNER", 61)
+		self.LEFT_MOUTH_CORNER = getattr(self, "LEFT_MOUTH_CORNER", 291)
+		self._indices_pose = getattr(self, "_indices_pose", [4, 152, 263, 33, 291, 61])
+
+		# 4. Initialize hardware and models
 		self.cap = self.init_video_input()
 		self.FPS = self.cap.get(cv.CAP_PROP_FPS)
 		if self.FPS == 0:
 			print("Warning: Video FPS reported as 0. Defaulting to 30 FPS for calculations.")
 			self.FPS = 30.0
-
 		self.face_mesh = self.init_face_mesh()
 		self.socket = self.init_socket()
-		self.csv_data = []  # Reset per part
+
+		# 5. Initialize state variables
+		self.initial_pitch, self.initial_yaw, self.initial_roll = None, None, None
+		self.calibrated = False
+		self.TOTAL_BLINKS = 0
+		self.EYES_BLINK_FRAME_COUNTER = 0
+		self.csv_data = []
+		self.angle_buffer = AngleBuffer(size=self.MOVING_AVERAGE_WINDOW)
+		self.current_video_part = 1
+		self.split_triggered_and_finalized = False
+		self._reset_per_frame_state()
 		self._setup_column_names()
 
-		# Video splitting parameters
-		self.split_at_ms = getattr(self, "SPLIT_VIDEO_AT_MS", None)
-		self.output_suffix_part1 = getattr(self, "OUTPUT_FILENAME_SUFFIX_PART1", "_part1")
-		self.output_suffix_part2 = getattr(self, "OUTPUT_FILENAME_SUFFIX_PART2", "_part2")
-		self.current_video_part = 1
-		self.split_triggered_and_finalized = False  # To ensure part 1 is finalized only once
+		# 6. Setup Calibration
+		self.CALIBRATION_METHOD = getattr(self, "METHOD", "manual")
+		self.auto_calibrate_pending = self.CALIBRATION_METHOD in ["clustering", "gaze_informed"]
+		calib_duration_sec = getattr(self, "DURATION_SECONDS", 30)
+		self.CLUSTERING_CALIB_DURATION_FRAMES = int(calib_duration_sec * self.FPS)
+		self.clustering_calib_all_samples = []
+		self.head_pose_calibration_samples = {'pitch': [], 'yaw': [], 'roll': []}
+		self.head_pose_calibration_frame_counter = 0
 
-		# Initialize video output for the first part (or whole video if no split)
+		# 7. Setup Trial Detection
+		self.ENABLE_VIDEO_TRIAL_DETECTION = getattr(self, "ENABLE", False)
+		if self.ENABLE_VIDEO_TRIAL_DETECTION:
+			self.trial_counter = 0
+			self.current_trial_data = None
+			self.all_trials_summary = []
+			self.last_trial_end_time_ms = -getattr(self, "MIN_INTER_TRIAL_INTERVAL_MS", 1000)
+			self.roi_brightness_samples = []
+			self.roi_baseline_brightness = None
+			self.last_trial_result_text = ""
+			self._validate_trial_detection_config()
+
+		# 8. Initialize video output for the first part
 		current_output_suffix = self.output_suffix_part1 if self.split_at_ms is not None else ""
 		if self.VIDEO_OUTPUT_BASE:
 			self.out = self.init_video_output(part_suffix=current_output_suffix)
 		else:
 			self.out = None
 
-		if self.ENABLE_VIDEO_TRIAL_DETECTION:
-			self.trial_counter = 0  # Reset per part
-			self.current_trial_data = None  # Reset per part
-			self.all_trials_summary = []  # Reset per part
-			self.last_trial_end_time_ms = -self.MIN_INTER_TRIAL_INTERVAL_MS  # Reset per part
-			self.roi_brightness_samples = []  # Reset per part
-			self.roi_baseline_brightness = None  # Reset per part
-			self.last_trial_result_text = ""  # To hold the result of the last completed trial for display
-			self._validate_trial_detection_config()
-
-		self.auto_calibrate_pending = getattr(self, "AUTO_CALIBRATE_ON_START", True)
-		self.angle_buffer = AngleBuffer(size=self.MOVING_AVERAGE_WINDOW)  # Reset per part
-
-		self._reset_per_frame_state()
-
-		# Head Pose Auto-Calibration Attributes
-		self.head_pose_calibration_samples = {'pitch': [], 'yaw': [], 'roll': []}
-		self.head_pose_calibration_frame_counter = 0
-		# self.auto_calibrate_pending is already loaded from config (AUTO_CALIBRATE_ON_START)
-		# self.calibrated is already initialized
-
-		# Ensure default values if not in config for these new params
-		self.HEAD_POSE_AUTO_CALIBRATION_ENABLED = getattr(self, "HEAD_POSE_AUTO_CALIBRATION_ENABLED", False)
-		self.HEAD_POSE_AUTO_CALIB_DURATION_FRAMES = getattr(self, "HEAD_POSE_AUTO_CALIB_DURATION_FRAMES", 150)
-		self.HEAD_POSE_AUTO_CALIB_MIN_SAMPLES = getattr(self, "HEAD_POSE_AUTO_CALIB_MIN_SAMPLES", 30)
-		self.HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE = getattr(self, "HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE", [-7, 7])
-		self.HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE = getattr(self, "HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE", [-7, 7])
+		# 9. Set starting timestamp
+		if not starting_timestamp:
+			self.starting_timestamp = datetime.now()
+		else:
+			self.starting_timestamp = datetime.strptime(str(starting_timestamp), self.TIMESTAMP_FORMAT)
 
 	def _reset_per_frame_state(self):
 		"""Resets variables that store state for the current frame."""
@@ -131,16 +168,21 @@ class HeadGazeTracker(object):
 			)
 
 	def _validate_trial_detection_config(self):
+		# Check for brightness threshold
 		if not hasattr(self, 'ROI_BRIGHTNESS_THRESHOLD_FACTOR') and \
 				not hasattr(self, 'ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD'):
 			print("WARNING: Neither ROI_BRIGHTNESS_THRESHOLD_FACTOR nor ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD is set.")
 			print("Trial detection might not work. Defaulting to a high absolute threshold.")
 			self.ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD = 250
 
-		if not (isinstance(self.STIMULUS_ROI_COORDS, list) and len(self.STIMULUS_ROI_COORDS) == 4):
+		# Check ROI coordinates
+		roi_coords = getattr(self, 'STIMULUS_ROI_COORDS', None)
+		if not (isinstance(roi_coords, list) and len(roi_coords) == 4):
 			raise ValueError("STIMULUS_ROI_COORDS must be a list of 4 integers [x, y, w, h]")
 
-		if getattr(self, 'ENABLE_EYE_GAZE_CHECK', False):
+		# Check gaze classification parameters
+		gaze_method = getattr(self, 'GAZE_CLASSIFICATION_METHOD', 'head_pose_only')
+		if "eye_gaze" in gaze_method:
 			required_eye_configs = [
 				'STIMULUS_LEFT_IRIS_DX_RANGE', 'STIMULUS_LEFT_IRIS_DY_RANGE',
 				'STIMULUS_RIGHT_IRIS_DX_RANGE', 'STIMULUS_RIGHT_IRIS_DY_RANGE'
@@ -149,35 +191,52 @@ class HeadGazeTracker(object):
 				if not hasattr(self, cfg_item) or not (
 						isinstance(getattr(self, cfg_item), list) and len(getattr(self, cfg_item)) == 2):
 					raise ValueError(
-						f"'{cfg_item}' must be a list of 2 numbers [min, max] if ENABLE_EYE_GAZE_CHECK is True")
+						f"'{cfg_item}' must be a list of 2 numbers [min, max] if using an eye_gaze method.")
 
-			if getattr(self, 'ENABLE_HEAD_POSE_FILTER_FOR_EYE_GAZE', False):
-				required_filter_configs = ['HEAD_POSE_FILTER_PITCH_RANGE', 'HEAD_POSE_FILTER_YAW_RANGE']
-				for cfg_item in required_filter_configs:
-					if not hasattr(self, cfg_item) or not (
-							isinstance(getattr(self, cfg_item), list) and len(getattr(self, cfg_item)) == 2):
-						raise ValueError(
-							f"'{cfg_item}' must be a list of 2 numbers [min, max] if ENABLE_HEAD_POSE_FILTER_FOR_EYE_GAZE is True")
+		if "head_filter" in gaze_method:
+			required_filter_configs = ['HEAD_POSE_FILTER_PITCH_RANGE', 'HEAD_POSE_FILTER_YAW_RANGE']
+			for cfg_item in required_filter_configs:
+				if not hasattr(self, cfg_item) or not (
+						isinstance(getattr(self, cfg_item), list) and len(getattr(self, cfg_item)) == 2):
+					raise ValueError(
+						f"'{cfg_item}' must be a list of 2 numbers [min, max] if using head_filter.")
 
-			if not hasattr(self, 'DOWNWARD_LOOK_LEFT_IRIS_DY_MIN'):
-				print(
-					"Warning: DOWNWARD_LOOK_LEFT_IRIS_DY_MIN not in config. Downward look detection for blinks might be affected.")
-				self.DOWNWARD_LOOK_LEFT_IRIS_DY_MIN = 999
-			if not hasattr(self, 'DOWNWARD_LOOK_RIGHT_IRIS_DY_MIN'):
-				print(
-					"Warning: DOWNWARD_LOOK_RIGHT_IRIS_DY_MIN not in config. Downward look detection for blinks might be affected.")
-				self.DOWNWARD_LOOK_RIGHT_IRIS_DY_MIN = 999
+		# Check downward look parameters
+		if not hasattr(self, 'DOWNWARD_LOOK_LEFT_IRIS_DY_MIN'):
+			print("Warning: DOWNWARD_LOOK_LEFT_IRIS_DY_MIN not in config. Defaulting to 999.")
+			self.DOWNWARD_LOOK_LEFT_IRIS_DY_MIN = 999
+		if not hasattr(self, 'DOWNWARD_LOOK_RIGHT_IRIS_DY_MIN'):
+			print("Warning: DOWNWARD_LOOK_RIGHT_IRIS_DY_MIN not in config. Defaulting to 999.")
+			self.DOWNWARD_LOOK_RIGHT_IRIS_DY_MIN = 999
 
 	def load_config(self, file_path):
+		"""Loads configuration from a nested YAML file and sets them as class attributes without prefixes."""
 		try:
 			with open(file_path, 'r') as file:
 				config_data = yaml.safe_load(file)
-			for key, value in config_data.items():
-				setattr(self, key, value)
+			if not config_data:
+				raise ValueError("Config file is empty or invalid.")
+
+			# Iterate through the top-level sections (e.g., 'System', 'Files')
+			for section, params in config_data.items():
+				if isinstance(params, dict):
+					# Iterate through the key-value pairs in each section
+					for key, value in params.items():
+						# If a value is another dictionary (like 'Clustering'), iterate through it too
+						if isinstance(value, dict):
+							for sub_key, sub_value in value.items():
+								setattr(self, sub_key, sub_value)
+						else:
+							# Set the attribute directly on the class instance
+							setattr(self, key, value)
+				else:
+					# For any top-level non-dictionary items
+					setattr(self, section, params)
+
 		except FileNotFoundError:
 			print(f"Error: Configuration file not found at '{file_path}'")
 			raise
-		except yaml.YAMLError as e:
+		except (yaml.YAMLError, ValueError) as e:
 			print(f"Error parsing YAML configuration file: {e}")
 			raise
 
@@ -374,55 +433,70 @@ class HeadGazeTracker(object):
 			self.EYES_BLINK_FRAME_COUNTER = 0
 
 	def _process_head_pose(self, mesh_points, img_h, img_w, key_pressed):
+		# Estimate raw head pose and apply moving average for smoothing
 		self.raw_head_pitch, self.raw_head_yaw, self.raw_head_roll = self.estimate_head_pose(mesh_points,
 		                                                                                     (img_h, img_w))
 		self.angle_buffer.add([self.raw_head_pitch, self.raw_head_yaw, self.raw_head_roll])
 		self.smooth_pitch, self.smooth_yaw, self.smooth_roll = self.angle_buffer.get_average()
 
-		# --- New Automatic Head Pose Calibration Logic ---
-		if self.HEAD_POSE_AUTO_CALIBRATION_ENABLED and self.auto_calibrate_pending and not self.calibrated:
-			self.head_pose_calibration_frame_counter += 1
+		# --- Automatic Head Pose Calibration Logic ---
+		# This block runs if auto-calibration is pending and a baseline hasn't been set yet.
+		if self.auto_calibrate_pending and not self.calibrated:
 
-			# Check if eyes are looking relatively forward
-			# self.l_dx, self.l_dy etc. should be populated by _extract_eye_features before this
-			eye_dx_ok = (self.HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE[0] <= self.l_dx <=
-			             self.HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE[1] and
-			             self.HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE[0] <= self.r_dx <=
-			             self.HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE[1])
-			eye_dy_ok = (self.HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE[0] <= self.l_dy <=
-			             self.HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE[1] and
-			             self.HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE[0] <= self.r_dy <=
-			             self.HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE[1])
+			# --- Method 1: Clustering (most robust for noisy data) ---
+			if self.CALIBRATION_METHOD == 'clustering':
+				# Collect all smoothed head poses for the configured duration
+				self.clustering_calib_all_samples.append([self.smooth_pitch, self.smooth_yaw, self.smooth_roll])
 
-			if eye_dx_ok and eye_dy_ok:
-				self.head_pose_calibration_samples['pitch'].append(self.smooth_pitch)
-				self.head_pose_calibration_samples['yaw'].append(self.smooth_yaw)
-				self.head_pose_calibration_samples['roll'].append(self.smooth_roll)
-				if self.PRINT_DATA and self.frame_count % 15 == 0:  # Occasional print
-					print(
-						f"HP Calib sample: P={self.smooth_pitch:.1f} Y={self.smooth_yaw:.1f}. N={len(self.head_pose_calibration_samples['pitch'])}")
+				# Once enough samples are collected, perform the clustering analysis
+				if len(self.clustering_calib_all_samples) >= self.CLUSTERING_CALIB_DURATION_FRAMES:
+					self._perform_clustering_calibration()
+					self.auto_calibrate_pending = False  # Calibration attempt is complete
 
-			# Check if calibration period is over or enough samples collected
-			if self.head_pose_calibration_frame_counter >= self.HEAD_POSE_AUTO_CALIB_DURATION_FRAMES:
-				if len(self.head_pose_calibration_samples['pitch']) >= self.HEAD_POSE_AUTO_CALIB_MIN_SAMPLES:
-					self.initial_pitch = np.mean(self.head_pose_calibration_samples['pitch'])
-					self.initial_yaw = np.mean(self.head_pose_calibration_samples['yaw'])
-					self.initial_roll = np.mean(self.head_pose_calibration_samples['roll'])
-					self.calibrated = True
-					self.auto_calibrate_pending = False  # Stop trying to auto-calibrate
-					if self.PRINT_DATA:
+			# --- Method 2: Gaze-Informed (collects samples when eyes are centered) ---
+			elif self.CALIBRATION_METHOD == 'gaze_informed':
+				self.head_pose_calibration_frame_counter += 1
+
+				# Check if eyes are looking relatively forward to ensure a good quality sample
+				eye_dx_ok = (self.HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE[0] <= self.l_dx <=
+				             self.HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE[1] and
+				             self.HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE[0] <= self.r_dx <=
+				             self.HEAD_POSE_AUTO_CALIB_EYE_DX_RANGE[1])
+				eye_dy_ok = (self.HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE[0] <= self.l_dy <=
+				             self.HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE[1] and
+				             self.HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE[0] <= self.r_dy <=
+				             self.HEAD_POSE_AUTO_CALIB_EYE_DY_RANGE[1])
+
+				if eye_dx_ok and eye_dy_ok:
+					self.head_pose_calibration_samples['pitch'].append(self.smooth_pitch)
+					self.head_pose_calibration_samples['yaw'].append(self.smooth_yaw)
+					self.head_pose_calibration_samples['roll'].append(self.smooth_roll)
+					if self.PRINT_DATA and self.frame_count % 15 == 0:  # Occasional print
 						print(
-							f"Head pose auto-calibrated using {len(self.head_pose_calibration_samples['pitch'])} samples.")
-						print(
-							f"Initial Pose: P={self.initial_pitch:.1f}, Y={self.initial_yaw:.1f}, R={self.initial_roll:.1f}")
-				else:
-					if self.PRINT_DATA:
-						print(
-							f"Head pose auto-calibration failed: Not enough suitable samples ({len(self.head_pose_calibration_samples['pitch'])} collected). Manual calibration ('c') may be needed.")
+							f"HP Calib sample: P={self.smooth_pitch:.1f} Y={self.smooth_yaw:.1f}. N={len(self.head_pose_calibration_samples['pitch'])}")
+
+				# Check if the calibration period is over
+				if self.head_pose_calibration_frame_counter >= self.HEAD_POSE_AUTO_CALIB_DURATION_FRAMES:
+					# Ensure we have enough high-quality samples
+					if len(self.head_pose_calibration_samples['pitch']) >= self.HEAD_POSE_AUTO_CALIB_MIN_SAMPLES:
+						# Use MEDIAN instead of MEAN for robustness against outliers
+						self.initial_pitch = np.mean(self.head_pose_calibration_samples['pitch'])
+						self.initial_yaw = np.mean(self.head_pose_calibration_samples['yaw'])
+						self.initial_roll = np.mean(self.head_pose_calibration_samples['roll'])
+						self.calibrated = True
+						if self.PRINT_DATA:
+							print(
+								f"Head pose auto-calibrated using {len(self.head_pose_calibration_samples['pitch'])} samples.")
+							print(
+								f"Initial Pose (Median): P={self.initial_pitch:.1f}, Y={self.initial_yaw:.1f}, R={self.initial_roll:.1f}")
+					else:
+						if self.PRINT_DATA:
+							print(
+								f"Head pose auto-calibration failed: Not enough suitable samples ({len(self.head_pose_calibration_samples['pitch'])} collected). Manual calibration ('c') may be needed.")
+
 					self.auto_calibrate_pending = False  # Stop trying to auto-calibrate to prevent repeated messages
-		# --- End of New Automatic Head Pose Calibration Logic ---
 
-		# Manual calibration by key press (overrides auto-calibration)
+		# Manual calibration by key press (overrides any auto-calibration)
 		if key_pressed == ord('c'):
 			self.initial_pitch, self.initial_yaw, self.initial_roll = self.smooth_pitch, self.smooth_yaw, self.smooth_roll
 			self.calibrated = True
@@ -430,13 +504,53 @@ class HeadGazeTracker(object):
 			if self.PRINT_DATA: print(
 				f"Head pose recalibrated by user: P={self.initial_pitch:.1f}, Y={self.initial_yaw:.1f}, R={self.initial_roll:.1f}")
 
+		# Adjust head pose angles based on the calibration baseline
 		if self.calibrated:
 			self.adj_pitch = self.smooth_pitch - self.initial_pitch
 			self.adj_yaw = self.smooth_yaw - self.initial_yaw
 			self.adj_roll = self.smooth_roll - self.initial_roll
 		else:
-			# If not calibrated (either auto failed or disabled, and 'c' not pressed), use raw smoothed values
+			# If not calibrated, use the raw smoothed values (no adjustment)
 			self.adj_pitch, self.adj_yaw, self.adj_roll = self.smooth_pitch, self.smooth_yaw, self.smooth_roll
+
+	def _perform_clustering_calibration(self):
+		"""Finds the baseline pose by clustering all collected samples."""
+		if not self.clustering_calib_all_samples:
+			if self.PRINT_DATA: print("Clustering calibration failed: No samples collected.")
+			return
+
+		pose_array = np.array(self.clustering_calib_all_samples)
+		if self.PRINT_DATA:
+			print(f"Performing clustering calibration on {len(pose_array)} head pose samples...")
+
+		# DBSCAN parameters can be loaded from config
+		eps = getattr(self, "CLUSTERING_DBSCAN_EPS", 3.0)
+		min_samples = getattr(self, "CLUSTERING_DBSCAN_MIN_SAMPLES", 15)
+
+		db = DBSCAN(eps=eps, min_samples=min_samples).fit(pose_array)
+		labels = db.labels_
+
+		# Find the largest cluster (ignoring noise, which is labeled -1)
+		unique_labels, counts = np.unique(labels[labels != -1], return_counts=True)
+
+		if len(counts) == 0:
+			if self.PRINT_DATA:
+				print("Clustering found no stable pose. Falling back to median of all samples.")
+			# Fallback: if no clusters are found, the median of all data is still a robust choice.
+			baseline_pose = np.median(pose_array, axis=0)
+		else:
+			# The baseline pose is the centroid (median) of the largest cluster
+			largest_cluster_label = unique_labels[counts.argmax()]
+			largest_cluster_points = pose_array[labels == largest_cluster_label]
+			baseline_pose = np.median(largest_cluster_points, axis=0)
+			if self.PRINT_DATA:
+				print(f"Found largest cluster with {counts.max()} points (out of {len(labels)}).")
+
+		self.initial_pitch, self.initial_yaw, self.initial_roll = baseline_pose
+		self.calibrated = True
+		if self.PRINT_DATA:
+			print(f"Calibration completed via clustering.")
+			print(f"New Initial Pose: P={self.initial_pitch:.1f}, Y={self.initial_yaw:.1f}, R={self.initial_roll:.1f}")
 
 	def _get_face_looks_text(self):
 		angle_y = self.adj_yaw if self.calibrated else self.smooth_yaw
@@ -516,39 +630,41 @@ class HeadGazeTracker(object):
 				self.current_trial_data = None
 
 	def _classify_gaze_for_current_trial(self, current_frame_time_ms):
+		stimulus_duration_ms = getattr(self, "STIMULUS_DURATION_MS", 800)
 		is_stim_period = (current_frame_time_ms >= self.current_trial_data['start_time_ms'] and
-		                  current_frame_time_ms < self.current_trial_data['stimulus_end_time_ms'])
+		                  current_frame_time_ms < self.current_trial_data['start_time_ms'] + stimulus_duration_ms)
 		if not is_stim_period:
 			self.gaze_on_stimulus_display_text = ""
 			return
 
 		self.current_trial_data['stimulus_frames_processed_gaze'] += 1
 		gaze_on_stim_area_this_frame = False
+		gaze_method = getattr(self, 'GAZE_CLASSIFICATION_METHOD', 'head_pose_only')
 
-		if getattr(self, 'ENABLE_EYE_GAZE_CHECK', False):
+		if "eye_gaze" in gaze_method:
 			eye_gaze_dx_ok = (
-					self.STIMULUS_LEFT_IRIS_DX_RANGE[0] <= self.l_dx <= self.STIMULUS_LEFT_IRIS_DX_RANGE[1] and
-					self.STIMULUS_RIGHT_IRIS_DX_RANGE[0] <= self.r_dx <= self.STIMULUS_RIGHT_IRIS_DX_RANGE[1])
+					getattr(self, 'STIMULUS_LEFT_IRIS_DX_RANGE')[0] <= self.l_dx <= getattr(self, 'STIMULUS_LEFT_IRIS_DX_RANGE')[1] and
+					getattr(self, 'STIMULUS_RIGHT_IRIS_DX_RANGE')[0] <= self.r_dx <= getattr(self, 'STIMULUS_RIGHT_IRIS_DX_RANGE')[1])
 			eye_gaze_dy_ok = (
-					self.STIMULUS_LEFT_IRIS_DY_RANGE[0] <= self.l_dy <= self.STIMULUS_LEFT_IRIS_DY_RANGE[1] and
-					self.STIMULUS_RIGHT_IRIS_DY_RANGE[0] <= self.r_dy <= self.STIMULUS_RIGHT_IRIS_DY_RANGE[1])
-			eye_gaze_ok = eye_gaze_dx_ok and eye_gaze_dy_ok
+					getattr(self, 'STIMULUS_LEFT_IRIS_DY_RANGE')[0] <= self.l_dy <= getattr(self, 'STIMULUS_LEFT_IRIS_DY_RANGE')[1] and
+					getattr(self, 'STIMULUS_RIGHT_IRIS_DY_RANGE')[0] <= self.r_dy <= getattr(self, 'STIMULUS_RIGHT_IRIS_DY_RANGE')[1])
 
-			if eye_gaze_ok:
-				if getattr(self, 'ENABLE_HEAD_POSE_FILTER_FOR_EYE_GAZE', False):
+			if eye_gaze_dx_ok and eye_gaze_dy_ok:
+				if gaze_method == "eye_gaze_with_head_filter":
 					if self.calibrated:
 						head_filter_ok = (
-								self.HEAD_POSE_FILTER_PITCH_RANGE[0] <= self.adj_pitch <=
-								self.HEAD_POSE_FILTER_PITCH_RANGE[1] and
-								self.HEAD_POSE_FILTER_YAW_RANGE[0] <= self.adj_yaw <= self.HEAD_POSE_FILTER_YAW_RANGE[
-									1])
-						if head_filter_ok: gaze_on_stim_area_this_frame = True
-				else:
+								getattr(self, 'HEAD_POSE_FILTER_PITCH_RANGE')[0] <= self.adj_pitch <= getattr(self, 'HEAD_POSE_FILTER_PITCH_RANGE')[1] and
+								getattr(self, 'HEAD_POSE_FILTER_YAW_RANGE')[0] <= self.adj_yaw <= getattr(self, 'HEAD_POSE_FILTER_YAW_RANGE')[1])
+						if head_filter_ok:
+							gaze_on_stim_area_this_frame = True
+				else:  # eye_gaze_only
 					gaze_on_stim_area_this_frame = True
-		elif self.ENABLE_HEAD_POSE and self.calibrated:
-			gaze_on_stim_area_this_frame = (
-					self.STIMULUS_PITCH_RANGE[0] <= self.adj_pitch <= self.STIMULUS_PITCH_RANGE[1] and
-					self.STIMULUS_YAW_RANGE[0] <= self.adj_yaw <= self.STIMULUS_YAW_RANGE[1])
+
+		elif gaze_method == "head_pose_only":
+			if self.calibrated:
+				gaze_on_stim_area_this_frame = (
+						getattr(self, 'STIMULUS_PITCH_RANGE')[0] <= self.adj_pitch <= getattr(self, 'STIMULUS_PITCH_RANGE')[1] and
+						getattr(self, 'STIMULUS_YAW_RANGE')[0] <= self.adj_yaw <= getattr(self, 'STIMULUS_YAW_RANGE')[1])
 
 		if gaze_on_stim_area_this_frame:
 			self.current_trial_data['frames_on_stimulus_area'] += 1
@@ -864,17 +980,126 @@ class HeadGazeTracker(object):
 			writer.writerows(self.csv_data)
 		if self.PRINT_DATA: print(f"Main log data saved: {csv_fn}")
 
-	def run(self):
-		self.frame_count = -1
-		# self.angle_buffer is now initialized in __init__ and _prepare_for_next_part
+	def _reset_analysis_state(self):
+		"""Resets all state variables required for a fresh analysis pass."""
+		if self.PRINT_DATA:
+			print("Resetting tracker state for main analysis pass...")
 
+		# Re-initialize video capture to start from the beginning
+		self.cap = self.init_video_input()
+
+		# Re-initialize video writer for the first part
+		current_output_suffix = self.output_suffix_part1 if self.split_at_ms is not None else ""
+		if self.VIDEO_OUTPUT_BASE:
+			self.out = self.init_video_output(part_suffix=current_output_suffix)
+		else:
+			self.out = None
+
+		# Reset data accumulators and counters
+		self.TOTAL_BLINKS = 0
+		self.EYES_BLINK_FRAME_COUNTER = 0
+		self.csv_data = []
+		self.angle_buffer = AngleBuffer(size=self.MOVING_AVERAGE_WINDOW)
+
+		# Reset video splitting state
+		self.current_video_part = 1
+		self.split_triggered_and_finalized = False
+
+		# Reset trial detection state
+		if self.ENABLE_VIDEO_TRIAL_DETECTION:
+			self.trial_counter = 0
+			self.current_trial_data = None
+			self.all_trials_summary = []
+			self.last_trial_end_time_ms = -self.MIN_INTER_TRIAL_INTERVAL_MS
+			self.roi_brightness_samples = []
+			self.roi_baseline_brightness = None
+			self.last_trial_result_text = ""
+
+	def _execute_calibration_pass(self):
+		"""
+		First pass over the video to collect head pose data and perform clustering calibration.
+		Returns True on success, False on failure.
+		"""
+		if not self.cap or not self.cap.isOpened():
+			print("Error: Video capture not open for calibration pass.")
+			return False
+
+		calib_duration_sec = getattr(self, "CLUSTERING_CALIB_DURATION_SECONDS", 30)
+		frame_limit = int(calib_duration_sec * self.FPS)
+
+		frame_num = 0
+		while self.cap.isOpened() and frame_num < frame_limit:
+			frame, img_h, img_w, ret = self._get_and_preprocess_frame()
+			if not ret:
+				if self.PRINT_DATA: print("Video ended before calibration period finished.")
+				break
+
+			# We only need to run face mesh and head pose estimation
+			results, _, mesh_points, _ = self._process_face_mesh(frame)
+
+			if results and results.multi_face_landmarks:
+				# _process_head_pose will see that clustering is pending and append samples
+				self._process_head_pose(mesh_points, img_h, img_w, key_pressed=-1)
+
+			frame_num += 1
+			if self.PRINT_DATA and frame_num % int(self.FPS or 30) == 0:
+				print(f"  Calibration Pass: Processed {frame_num}/{frame_limit} frames...")
+
+		# If the video was shorter than the calibration period, we might need to trigger calibration manually
+		if not self.calibrated and len(self.clustering_calib_all_samples) > 0:
+			self._perform_clustering_calibration()
+
+		# Release the capture object; it will be re-initialized for the main pass
+		self.cap.release()
+
+		# After calibration, we are no longer pending auto-calibration
+		self.auto_calibrate_pending = False
+
+		return self.calibrated
+
+	def _cleanup(self, finalize_data=True):
+		"""Releases resources and finalizes data saving."""
+		if self.cap and self.cap.isOpened():
+			self.cap.release()
+
+		if finalize_data:
+			# Finalize the last part being processed
+			final_suffix = self.output_suffix_part2 if self.split_triggered_and_finalized else \
+				(self.output_suffix_part1 if self.split_at_ms is not None else "")
+			self._finalize_part(part_suffix=final_suffix)
+
+		cv.destroyAllWindows()
+		if hasattr(self, 'socket') and self.socket:
+			self.socket.close()
+		if self.PRINT_DATA: print("Program exited.")
+
+	def run(self):
+		"""
+		Main entry point. Orchestrates calibration and analysis passes.
+		"""
+		# --- Pass 1: Pre-computation for Clustering Calibration ---
+		if self.CALIBRATION_METHOD == 'clustering':
+			print("--- Starting Pass 1: Calibration Data Collection ---")
+			if not self._execute_calibration_pass():
+				print("Clustering calibration failed. A face may not have been consistently visible.")
+				print("Aborting analysis.")
+				self._cleanup(finalize_data=False)  # Don't save empty logs
+				return
+			print("--- Calibration Complete. Starting Pass 2: Full Analysis ---")
+			self._reset_analysis_state()  # Reset video and state for the main run
+		else:
+			print("--- Starting Single-Pass Analysis ---")
+
+		# --- Main Analysis Loop (The only pass for non-clustering, or the second pass for clustering) ---
+		self.frame_count = -1
 		try:
 			while True:
 				self.frame_count += 1
 				self._reset_per_frame_state()
 
 				frame, img_h, img_w, ret = self._get_and_preprocess_frame()
-				if not ret: break
+				if not ret:
+					break
 
 				current_frame_time_ms = int(self.frame_count * (1000.0 / self.FPS))
 				if self.PRINT_DATA and self.frame_count % 60 == 0:
@@ -882,13 +1107,13 @@ class HeadGazeTracker(object):
 						f"Frame Nr.: {self.frame_count}, Time: {current_frame_time_ms}ms (Part {self.current_video_part})")
 
 				# --- Video Splitting Logic ---
-				if self.split_at_ms is not None and not self.split_triggered_and_finalized and \
+				if self.split_at_ms is not None and \
+						not self.split_triggered_and_finalized and \
 						current_frame_time_ms >= self.split_at_ms:
 					if self.PRINT_DATA: print(f"Split point reached at {current_frame_time_ms}ms. Finalizing Part 1.")
 					self._finalize_part(part_suffix=self.output_suffix_part1)
-					self._prepare_for_next_part(current_frame_time_ms)  # Pass the actual split time
+					self._prepare_for_next_part(current_frame_time_ms)
 					self.split_triggered_and_finalized = True
-				# Continue processing the current frame as the first frame of part 2
 				# --- End Splitting Logic ---
 
 				key_pressed = cv.waitKey(1) & 0xFF
@@ -903,6 +1128,8 @@ class HeadGazeTracker(object):
 					self._update_blink_count(mesh_points_3D_normalized)
 
 					if self.ENABLE_HEAD_POSE:
+						# For clustering, this now uses the pre-calibrated baseline.
+						# For other methods, it performs live calibration if needed.
 						self._process_head_pose(mesh_points, img_h, img_w, key_pressed)
 						self.face_looks_display_text = self._get_face_looks_text()
 
@@ -918,26 +1145,18 @@ class HeadGazeTracker(object):
 
 				if self.SHOW_ON_SCREEN_DATA:
 					self._draw_on_screen_data(frame, results_face_mesh, img_h, img_w, current_frame_time_ms)
+					cv.imshow("Eye Tracking", frame)
 
-				cv.imshow("Eye Tracking", frame)
-				self._write_video_frame(frame)  # Writes to self.out, which is managed for parts
+				self._write_video_frame(frame)
 
 				if self._handle_key_presses(key_pressed):
 					break
 		except Exception as e:
-			print(f"An error occurred in run loop: {e}")
+			print(f"An error occurred in the main run loop: {e}")
 			import traceback
 			traceback.print_exc()
 		finally:
-			self.cap.release()
-			# Finalize the last part being processed (either part 1 if no split, or part 2 if split)
-			final_suffix = self.output_suffix_part2 if self.split_triggered_and_finalized else \
-				(self.output_suffix_part1 if self.split_at_ms is not None else "")
-			self._finalize_part(part_suffix=final_suffix)
-
-			cv.destroyAllWindows()
-			if hasattr(self, 'socket'): self.socket.close()
-			if self.PRINT_DATA: print("Program exited.")
+			self._cleanup()
 
 
 if __name__ == "__main__":
