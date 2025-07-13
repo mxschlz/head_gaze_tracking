@@ -117,8 +117,11 @@ class HeadGazeTracker(object):
 			self.all_trials_summary = []
 			self.last_trial_end_time_ms = -getattr(self, "MIN_INTER_TRIAL_INTERVAL_MS", 1000)
 			self.roi_brightness_samples = []
-			self.roi_baseline_brightness = None
+			self.roi_baseline_mean = None
+			self.roi_baseline_std_dev = None
 			self.last_trial_result_text = ""
+			# Load the new gaze threshold parameter with a safe default
+			self.GAZE_DX_SUM_THRESHOLD = getattr(self, "GAZE_DX_SUM_THRESHOLD", 999)
 			self._validate_trial_detection_config()
 
 		# 8. Initialize video output for the first part
@@ -168,45 +171,74 @@ class HeadGazeTracker(object):
 			)
 
 	def _validate_trial_detection_config(self):
-		# Check for brightness threshold
-		if not hasattr(self, 'ROI_BRIGHTNESS_THRESHOLD_FACTOR') and \
-				not hasattr(self, 'ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD'):
-			print("WARNING: Neither ROI_BRIGHTNESS_THRESHOLD_FACTOR nor ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD is set.")
-			print("Trial detection might not work. Defaulting to a high absolute threshold.")
-			self.ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD = 250
+		"""
+		Validates that all necessary parameters for trial detection and gaze classification
+		are present and correctly formatted in the loaded configuration.
+		Raises a ValueError if a critical parameter is missing or malformed.
+		"""
+		# Helper function to reduce code repetition.
+		def _check_param_is_list_of_two(param_name):
+			if not hasattr(self, param_name) or not (
+					isinstance(getattr(self, param_name), list) and len(getattr(self, param_name)) == 2):
+				raise ValueError(
+					f"Configuration Error: The parameter '{param_name}' is required for the selected gaze "
+					f"classification method and must be a list of two numbers (e.g., [min, max])."
+				)
 
-		# Check ROI coordinates
+		# --- 1. Validate Trial Onset Detection ---
+		if not hasattr(self, 'ROI_BRIGHTNESS_THRESHOLD_FACTOR') and \
+		   not hasattr(self, 'ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD'):
+			print("WARNING: Neither 'ROI_BRIGHTNESS_THRESHOLD_FACTOR' nor 'ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD' is set.")
+			print("Trial detection via screen brightness might not work.")
+			# Set a high default to prevent accidental triggering.
+			self.ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD = 255
+
 		roi_coords = getattr(self, 'STIMULUS_ROI_COORDS', None)
 		if not (isinstance(roi_coords, list) and len(roi_coords) == 4):
-			raise ValueError("STIMULUS_ROI_COORDS must be a list of 4 integers [x, y, w, h]")
+			raise ValueError("Configuration Error: 'STIMULUS_ROI_COORDS' must be a list of 4 integers [x, y, w, h].")
 
-		# Check gaze classification parameters
-		gaze_method = getattr(self, 'GAZE_CLASSIFICATION_METHOD', 'head_pose_only')
-		if "eye_gaze" in gaze_method:
-			required_eye_configs = [
-				'STIMULUS_LEFT_IRIS_DX_RANGE', 'STIMULUS_LEFT_IRIS_DY_RANGE',
-				'STIMULUS_RIGHT_IRIS_DX_RANGE', 'STIMULUS_RIGHT_IRIS_DY_RANGE'
+		# --- 2. Validate Gaze Classification Parameters ---
+		gaze_method = getattr(self, 'GAZE_CLASSIFICATION_METHOD', 'none')
+
+		if gaze_method == "compensatory_gaze":
+			required_params = [
+				'COMPENSATORY_HEAD_PITCH_RANGE',
+				'COMPENSATORY_HEAD_YAW_RANGE_CENTER', 'COMPENSATORY_EYE_SUM_RANGE_CENTER',
+				'COMPENSATORY_HEAD_YAW_RANGE_LEFT', 'COMPENSATORY_EYE_SUM_RANGE_LEFT_TURN',
+				'COMPENSATORY_HEAD_YAW_RANGE_RIGHT', 'COMPENSATORY_EYE_SUM_RANGE_RIGHT_TURN',
+				'STIMULUS_LEFT_IRIS_DY_RANGE', 'STIMULUS_RIGHT_IRIS_DY_RANGE' # Still needed for vertical check
 			]
-			for cfg_item in required_eye_configs:
-				if not hasattr(self, cfg_item) or not (
-						isinstance(getattr(self, cfg_item), list) and len(getattr(self, cfg_item)) == 2):
-					raise ValueError(
-						f"'{cfg_item}' must be a list of 2 numbers [min, max] if using an eye_gaze method.")
+			for param in required_params:
+				_check_param_is_list_of_two(param)
 
-		if "head_filter" in gaze_method:
-			required_filter_configs = ['HEAD_POSE_FILTER_PITCH_RANGE', 'HEAD_POSE_FILTER_YAW_RANGE']
-			for cfg_item in required_filter_configs:
-				if not hasattr(self, cfg_item) or not (
-						isinstance(getattr(self, cfg_item), list) and len(getattr(self, cfg_item)) == 2):
-					raise ValueError(
-						f"'{cfg_item}' must be a list of 2 numbers [min, max] if using head_filter.")
+		elif "eye_gaze" in gaze_method:
+			# This block handles "eye_gaze_only" and "eye_gaze_with_head_filter"
 
-		# Check downward look parameters
+			# Check for horizontal eye gaze params (either the new sum or the old ranges)
+			if not hasattr(self, 'GAZE_DX_SUM_THRESHOLD') or self.GAZE_DX_SUM_THRESHOLD >= 999:
+				# If sum threshold is disabled, the old individual ranges are required.
+				_check_param_is_list_of_two('STIMULUS_LEFT_IRIS_DX_RANGE')
+				_check_param_is_list_of_two('STIMULUS_RIGHT_IRIS_DX_RANGE')
+
+			# Check for vertical eye gaze params (always required for eye_gaze methods)
+			_check_param_is_list_of_two('STIMULUS_LEFT_IRIS_DY_RANGE')
+			_check_param_is_list_of_two('STIMULUS_RIGHT_IRIS_DY_RANGE')
+
+			# If using the head filter, check for its specific parameters.
+			if gaze_method == "eye_gaze_with_head_filter":
+				_check_param_is_list_of_two('HEAD_POSE_FILTER_PITCH_RANGE')
+				_check_param_is_list_of_two('HEAD_POSE_FILTER_YAW_RANGE')
+
+		elif gaze_method == "head_pose_only":
+			_check_param_is_list_of_two('STIMULUS_PITCH_RANGE')
+			_check_param_is_list_of_two('STIMULUS_YAW_RANGE')
+
+		# --- 3. Validate Gaze Refinements (Non-critical, provide warnings) ---
 		if not hasattr(self, 'DOWNWARD_LOOK_LEFT_IRIS_DY_MIN'):
-			print("Warning: DOWNWARD_LOOK_LEFT_IRIS_DY_MIN not in config. Defaulting to 999.")
+			print("Warning: 'DOWNWARD_LOOK_LEFT_IRIS_DY_MIN' not in config. Defaulting to 999 (disabled).")
 			self.DOWNWARD_LOOK_LEFT_IRIS_DY_MIN = 999
 		if not hasattr(self, 'DOWNWARD_LOOK_RIGHT_IRIS_DY_MIN'):
-			print("Warning: DOWNWARD_LOOK_RIGHT_IRIS_DY_MIN not in config. Defaulting to 999.")
+			print("Warning: 'DOWNWARD_LOOK_RIGHT_IRIS_DY_MIN' not in config. Defaulting to 999 (disabled).")
 			self.DOWNWARD_LOOK_RIGHT_IRIS_DY_MIN = 999
 
 	def load_config(self, file_path):
@@ -363,6 +395,180 @@ class HeadGazeTracker(object):
 	@staticmethod
 	def init_socket():
 		return socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+	def _find_dynamic_roi(self):
+		"""
+		Analyzes a specific interval of the video to find the region with the highest
+		brightness variance, which is assumed to be the stimulus ROI. This is a pre-analysis pass.
+		Returns True on success, False on failure.
+		"""
+		if not self.cap or not self.cap.isOpened():
+			print("Error: Video capture not open for dynamic ROI detection.")
+			return False
+
+		# --- 1. Get parameters from config ---
+		search_start_sec = getattr(self, "SEARCH_START_SECONDS", 0)
+		search_duration_sec = getattr(self, "SEARCH_DURATION_SECONDS", 30)
+		grid_cols, grid_rows = getattr(self, "GRID_DIVISIONS", [12, 10])
+		frame_limit = int(search_duration_sec * self.FPS)
+
+		if self.PRINT_DATA:
+			print(f"Dynamic ROI search will start at {search_start_sec}s and run for {search_duration_sec}s.")
+			print(f"Using a {grid_cols}x{grid_rows} grid.")
+
+		# --- 2. Seek to the start of the search interval ---
+		if search_start_sec > 0:
+			start_time_ms = search_start_sec * 1000
+			self.cap.set(cv.CAP_PROP_POS_MSEC, start_time_ms)
+			if self.PRINT_DATA:
+				current_pos_ms = self.cap.get(cv.CAP_PROP_POS_MSEC)
+				print(f"Seeking video to {start_time_ms}ms... Current position is now ~{current_pos_ms:.0f}ms.")
+
+		# --- 3. Collect brightness data ---
+		cell_brightness_history = np.zeros((grid_rows, grid_cols, frame_limit), dtype=np.float32)
+		frame_num = 0
+		last_frame_for_viz = None
+		while self.cap.isOpened() and frame_num < frame_limit:
+			frame, img_h, img_w, ret = self._get_and_preprocess_frame()
+			if not ret:
+				if self.PRINT_DATA: print("Video ended before ROI search period finished.")
+				break
+			last_frame_for_viz = frame.copy()
+			search_area_coords = getattr(self, "SEARCH_AREA", [0, 0, img_w, img_h])
+			x_s, y_s, w_s, h_s = search_area_coords
+			search_frame = frame[y_s:y_s + h_s, x_s:x_s + w_s]
+			gray_frame = cv.cvtColor(search_frame, cv.COLOR_BGR2GRAY)
+			area_h, area_w = gray_frame.shape
+			cell_h, cell_w = area_h // grid_rows, area_w // grid_cols
+			for r in range(grid_rows):
+				for c in range(grid_cols):
+					y1, y2 = r * cell_h, (r + 1) * cell_h
+					x1, x2 = c * cell_w, (c + 1) * cell_w
+					cell = gray_frame[y1:y2, x1:x2]
+					if cell.size > 0:
+						cell_brightness_history[r, c, frame_num] = np.mean(cell)
+			frame_num += 1
+			if self.PRINT_DATA and frame_num % int(self.FPS or 30) == 0:
+				print(f"  ROI Search Pass: Processed {frame_num}/{frame_limit} frames...")
+
+		# --- 4. Analyze the collected data ---
+		if frame_num == 0:
+			print("Error: No frames processed for ROI detection. The search start time may be past the end of the video.")
+			return False
+		cell_brightness_history = cell_brightness_history[:, :, :frame_num]
+		stds = np.std(cell_brightness_history, axis=2)
+		max_std = np.max(stds)
+		if max_std < 2.0:
+			print("Warning: Dynamic ROI detection found very low activity in the search interval.")
+			self.cap.release()
+			self.cap = self.init_video_input()
+			return True
+
+		# --- 5. Create initial activity map ---
+		activity_threshold_percent = getattr(self, "ACTIVITY_THRESHOLD_PERCENT", 40)
+		activity_threshold = max_std * (activity_threshold_percent / 100.0)
+		activity_map = (stds >= activity_threshold).astype(np.uint8)
+
+		# --- 6. Clean the activity map ---
+		# (!!!) FIX: Access cleaning parameters from the MorphologicalCleaning dictionary
+		cleaning_config = getattr(self, "MorphologicalCleaning", {})
+		if cleaning_config.get("ENABLE_CLEANING", False):
+			# --- 6a. Morphological fine-tuning (breaks bridges to outliers) ---
+			erode_iter = cleaning_config.get("ERODE_ITERATIONS", 1)
+			dilate_iter = cleaning_config.get("DILATE_ITERATIONS", 2)
+			if erode_iter > 0:
+				kernel = np.ones((3, 3), np.uint8)
+				activity_map = cv.erode(activity_map, kernel, iterations=erode_iter)
+			if dilate_iter > 0:
+				kernel = np.ones((3, 3), np.uint8)
+				activity_map = cv.dilate(activity_map, kernel, iterations=dilate_iter)
+
+			# --- 6b. Isolate the largest blob after cleaning ---
+			if cleaning_config.get("KEEP_LARGEST_BLOB_ONLY", False):
+				contours, _ = cv.findContours(activity_map, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+				if contours:
+					largest_contour = max(contours, key=cv.contourArea)
+					clean_activity_map = np.zeros_like(activity_map)
+					cv.drawContours(clean_activity_map, [largest_contour], -1, 1, -1)
+					activity_map = clean_activity_map
+					if self.PRINT_DATA:
+						print(f"Isolated largest activity blob, removing {len(contours) - 1} smaller outlier(s).")
+
+		# --- 7. Calculate bounding box from the cleaned map ---
+		active_cells_indices = np.argwhere(activity_map > 0)
+		if active_cells_indices.size == 0:
+			print("Warning: No cells remained after cleaning. Falling back to the single most active cell.")
+			active_cells_indices = np.array([np.unravel_index(np.argmax(stds), stds.shape)])
+
+		min_row, max_row = np.min(active_cells_indices[:, 0]), np.max(active_cells_indices[:, 0])
+		min_col, max_col = np.min(active_cells_indices[:, 1]), np.max(active_cells_indices[:, 1])
+
+		x_s, y_s, w_s, h_s = getattr(self, "SEARCH_AREA", [0, 0, last_frame_for_viz.shape[1], last_frame_for_viz.shape[0]])
+		search_frame_shape = (h_s, w_s)
+		area_h, area_w = search_frame_shape
+		cell_h, cell_w = area_h // grid_rows, area_w // grid_cols
+
+		roi_x = (min_col * cell_w) + x_s
+		roi_y = (min_row * cell_h) + y_s
+		roi_w = (max_col - min_col + 1) * cell_w
+		roi_h = (max_row - min_row + 1) * cell_h
+
+		# --- 8. Apply Padding (Optional) ---
+		# (!!!) FIX: Access padding parameters from the ROIPadding dictionary
+		padding_config = getattr(self, "ROIPadding", {})
+		if padding_config.get("ENABLE_PADDING", False):
+			padding_percent = padding_config.get("PADDING_PERCENTAGE", 0)
+			if padding_percent > 0:
+				orig_roi_x, orig_roi_y, orig_roi_w, orig_roi_h = roi_x, roi_y, roi_w, roi_h
+				pad_w = int(roi_w * (padding_percent / 100.0))
+				pad_h = int(roi_h * (padding_percent / 100.0))
+				roi_x -= pad_w // 2
+				roi_y -= pad_h // 2
+				roi_w += pad_w
+				roi_h += pad_h
+				img_h_total, img_w_total, _ = last_frame_for_viz.shape
+				roi_x = max(0, roi_x)
+				roi_y = max(0, roi_y)
+				if roi_x + roi_w > img_w_total: roi_w = img_w_total - roi_x
+				if roi_y + roi_h > img_h_total: roi_h = img_h_total - roi_y
+				if self.PRINT_DATA: print(f"Applied {padding_percent}% padding. ROI expanded.")
+
+		# --- 9. Finalize and Visualize ---
+		self.STIMULUS_ROI_COORDS = [roi_x, roi_y, roi_w, roi_h]
+		if getattr(self, "VISUALIZE_ROI_SEARCH", False) and last_frame_for_viz is not None:
+			# (Visualization logic remains the same)
+			viz_img = last_frame_for_viz.copy()
+			overlay = viz_img.copy()
+			cv.rectangle(viz_img, (x_s, y_s), (x_s + w_s, y_s + h_s), (255, 255, 0), 2)
+			for r in range(grid_rows):
+				for c in range(grid_cols):
+					if activity_map[r, c] > 0:
+						intensity = min(stds[r, c] / max_std, 1.0)
+						color = (0, int(155 + intensity * 100), 0)
+						cell_x, cell_y = (c * cell_w) + x_s, (r * cell_h) + y_s
+						cv.rectangle(overlay, (cell_x, cell_y), (cell_x + cell_w, cell_y + cell_h), color, -1)
+			cv.addWeighted(overlay, 0.5, viz_img, 0.5, 0, viz_img)
+			if 'orig_roi_x' in locals():
+				cv.rectangle(viz_img, (orig_roi_x, orig_roi_y), (orig_roi_x + orig_roi_w, orig_roi_y + orig_roi_h), (0, 255, 255), 2)
+				cv.putText(viz_img, "Detected Box", (orig_roi_x + 5, orig_roi_y - 10), cv.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+			cv.rectangle(viz_img, (roi_x, roi_y), (roi_x + roi_w, roi_y + roi_h), (0, 0, 255), 3)
+			cv.putText(viz_img, "Final Padded ROI", (roi_x + 5, roi_y + 30), cv.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+			cv.imshow("Dynamic ROI Search Visualization", viz_img)
+			print("\n--- ROI VISUALIZATION ---")
+			print("Showing visualization of the ROI search. Press any key in the window to continue...")
+			cv.waitKey(0)
+			cv.destroyWindow("Dynamic ROI Search Visualization")
+
+		if self.PRINT_DATA:
+			print("-" * 30)
+			print(f"Dynamic ROI detection complete.")
+			print(f"Setting STIMULUS_ROI_COORDS to final bounding box: {self.STIMULUS_ROI_COORDS}")
+			print("-" * 30)
+
+		# IMPORTANT: Reset the video capture for the next pass
+		self.cap.release()
+		self.cap = self.init_video_input()
+		return True
 
 	def _get_and_preprocess_frame(self):
 		ret, frame = self.cap.read()
@@ -575,27 +781,57 @@ class HeadGazeTracker(object):
 		return 0.0
 
 	def _update_trial_state(self, current_frame_time_ms):
-		if hasattr(self, 'ROI_BRIGHTNESS_THRESHOLD_FACTOR') and self.roi_baseline_brightness is None:
-			if len(self.roi_brightness_samples) < self.ROI_BRIGHTNESS_BASELINE_FRAMES:
-				if not (self.current_trial_data and self.current_trial_data['active']):
+		"""
+		Manages the trial state machine: calculates the brightness baseline, detects trial onsets,
+		and finalizes trials when they end.
+		"""
+		# --- 1. Baseline Calculation ---
+		# If the baseline hasn't been calculated yet, collect brightness samples.
+		if self.roi_baseline_mean is None:
+			# Only collect samples if a trial is not currently active.
+			if not (self.current_trial_data and self.current_trial_data['active']):
+				if len(self.roi_brightness_samples) < self.ROI_BRIGHTNESS_BASELINE_FRAMES:
 					self.roi_brightness_samples.append(self.current_roi_brightness)
-			elif self.roi_brightness_samples:
-				self.roi_baseline_brightness = np.mean(self.roi_brightness_samples)
-				if self.PRINT_DATA: print(f"ROI Baseline Brightness: {self.roi_baseline_brightness:.2f}")
+				# Once enough samples are collected, calculate the baseline statistics.
+				elif self.roi_brightness_samples:
+					self.roi_baseline_mean = np.mean(self.roi_brightness_samples)
+					self.roi_baseline_std_dev = np.std(self.roi_brightness_samples)
+					# A very low SD (e.g., from a solid black screen) can be problematic.
+					# Ensure it's at least a small value to prevent division by zero or hypersensitivity.
+					if self.roi_baseline_std_dev < 0.5:
+						self.roi_baseline_std_dev = 0.5
+					if self.PRINT_DATA:
+						print(f"ROI Baseline Calculated: Mean={self.roi_baseline_mean:.2f}, SD={self.roi_baseline_std_dev:.2f}")
 			else:
-				self.roi_baseline_brightness = 0
+				# If we are in a trial before baseline is set, do nothing.
+				pass
 
+		# --- 2. Trial Onset Detection ---
+		stimulus_detected = False
+		# Only try to detect a stimulus if the baseline has been established.
+		if self.roi_baseline_mean is not None:
+			method = getattr(self, "TRIAL_ONSET_DETECTION_METHOD", "factor")
+
+			if method == "statistical":
+				std_dev_threshold = getattr(self, "ROI_BRIGHTNESS_STD_DEV_THRESHOLD", 4.0)
+				threshold = self.roi_baseline_mean + (std_dev_threshold * self.roi_baseline_std_dev)
+				if self.current_roi_brightness > threshold:
+					stimulus_detected = True
+			elif method == "factor":
+				factor = getattr(self, "ROI_BRIGHTNESS_THRESHOLD_FACTOR", 1.5)
+				threshold = self.roi_baseline_mean * factor
+				if self.current_roi_brightness > threshold:
+					stimulus_detected = True
+			elif method == "absolute":
+				threshold = getattr(self, "ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD", 255)
+				if self.current_roi_brightness > threshold:
+					stimulus_detected = True
+
+		# --- 3. Manage Trial State Machine ---
 		trial_can_start = (current_frame_time_ms >= self.last_trial_end_time_ms + self.MIN_INTER_TRIAL_INTERVAL_MS)
-		stimulus_detected_by_brightness = False
-		if self.roi_baseline_brightness is not None and hasattr(self, 'ROI_BRIGHTNESS_THRESHOLD_FACTOR'):
-			if self.current_roi_brightness > self.roi_baseline_brightness * self.ROI_BRIGHTNESS_THRESHOLD_FACTOR:
-				stimulus_detected_by_brightness = True
-		elif hasattr(self, 'ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD'):
-			if self.current_roi_brightness > self.ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD:
-				stimulus_detected_by_brightness = True
 
-		if trial_can_start and stimulus_detected_by_brightness and \
-				not (self.current_trial_data and self.current_trial_data['active']):
+		# If a stimulus is detected and we can start a new trial...
+		if trial_can_start and stimulus_detected and not (self.current_trial_data and self.current_trial_data['active']):
 			self.trial_counter += 1
 			start_t = current_frame_time_ms
 			stim_end_t = start_t + self.STIMULUS_DURATION_MS
@@ -605,67 +841,132 @@ class HeadGazeTracker(object):
 				'stimulus_end_time_ms': stim_end_t, 'trial_end_time_ms': trial_end_t,
 				'active': True, 'stimulus_frames_processed_gaze': 0,
 				'frames_on_stimulus_area': 0, 'looked_final': 2}
-			if self.PRINT_DATA: print(
-				f"Trial {self.trial_counter} START @{start_t}ms (Part {self.current_video_part}). ROI Bright: {self.current_roi_brightness:.2f}")
+			if self.PRINT_DATA:
+				print(f"Trial {self.trial_counter} START @{start_t}ms (Part {self.current_video_part}). ROI Bright: {self.current_roi_brightness:.2f}")
 
+		# If a trial is currently active, check if it should end.
 		if self.current_trial_data and self.current_trial_data['active']:
 			if current_frame_time_ms >= self.current_trial_data['trial_end_time_ms']:
-				if self.PRINT_DATA: print(
-					f"Trial {self.current_trial_data['id']} END @{current_frame_time_ms}ms (Part {self.current_video_part}).")
+				if self.PRINT_DATA:
+					print(f"Trial {self.current_trial_data['id']} END @{current_frame_time_ms}ms (Part {self.current_video_part}).")
+
+				# Finalize trial classification (looked vs. away)
 				if self.current_trial_data['stimulus_frames_processed_gaze'] > 0:
 					perc = (self.current_trial_data['frames_on_stimulus_area'] /
 					        self.current_trial_data['stimulus_frames_processed_gaze']) * 100
 					if perc >= self.LOOK_TO_STIMULUS_THRESHOLD_PERCENT:
 						self.current_trial_data['looked_final'] = 1
 
-				# Set text for display based on final classification
 				trial_id = self.current_trial_data['id']
-				if self.current_trial_data['looked_final'] == 1:
-					self.last_trial_result_text = f"Trial {trial_id} Result: Looked (1)"
-				else:  # It's 2
-					self.last_trial_result_text = f"Trial {trial_id} Result: Away (2)"
+				self.last_trial_result_text = f"Trial {trial_id} Result: {'Looked (1)' if self.current_trial_data['looked_final'] == 1 else 'Away (2)'}"
 
 				self.all_trials_summary.append(self.current_trial_data.copy())
 				self.last_trial_end_time_ms = self.current_trial_data['trial_end_time_ms']
 				self.current_trial_data = None
 
 	def _classify_gaze_for_current_trial(self, current_frame_time_ms):
-		stimulus_duration_ms = getattr(self, "STIMULUS_DURATION_MS", 800)
+		"""
+		Classifies gaze for the current frame based on the method specified in the config.
+		This is only called when a trial is active and a face is detected.
+		"""
+		# 1. Check if we are within the stimulus period for the active trial.
+		#    If not, there's nothing to classify, so we exit.
 		is_stim_period = (current_frame_time_ms >= self.current_trial_data['start_time_ms'] and
-		                  current_frame_time_ms < self.current_trial_data['start_time_ms'] + stimulus_duration_ms)
+		                  current_frame_time_ms < self.current_trial_data['stimulus_end_time_ms'])
 		if not is_stim_period:
 			self.gaze_on_stimulus_display_text = ""
 			return
 
+		# 2. This frame is valid for gaze processing. Increment the counter.
 		self.current_trial_data['stimulus_frames_processed_gaze'] += 1
+
 		gaze_on_stim_area_this_frame = False
-		gaze_method = getattr(self, 'GAZE_CLASSIFICATION_METHOD', 'head_pose_only')
+		gaze_method = self.GAZE_CLASSIFICATION_METHOD
 
-		if "eye_gaze" in gaze_method:
-			eye_gaze_dx_ok = (
-					getattr(self, 'STIMULUS_LEFT_IRIS_DX_RANGE')[0] <= self.l_dx <= getattr(self, 'STIMULUS_LEFT_IRIS_DX_RANGE')[1] and
-					getattr(self, 'STIMULUS_RIGHT_IRIS_DX_RANGE')[0] <= self.r_dx <= getattr(self, 'STIMULUS_RIGHT_IRIS_DX_RANGE')[1])
-			eye_gaze_dy_ok = (
-					getattr(self, 'STIMULUS_LEFT_IRIS_DY_RANGE')[0] <= self.l_dy <= getattr(self, 'STIMULUS_LEFT_IRIS_DY_RANGE')[1] and
-					getattr(self, 'STIMULUS_RIGHT_IRIS_DY_RANGE')[0] <= self.r_dy <= getattr(self, 'STIMULUS_RIGHT_IRIS_DY_RANGE')[1])
-
-			if eye_gaze_dx_ok and eye_gaze_dy_ok:
-				if gaze_method == "eye_gaze_with_head_filter":
-					if self.calibrated:
-						head_filter_ok = (
-								getattr(self, 'HEAD_POSE_FILTER_PITCH_RANGE')[0] <= self.adj_pitch <= getattr(self, 'HEAD_POSE_FILTER_PITCH_RANGE')[1] and
-								getattr(self, 'HEAD_POSE_FILTER_YAW_RANGE')[0] <= self.adj_yaw <= getattr(self, 'HEAD_POSE_FILTER_YAW_RANGE')[1])
-						if head_filter_ok:
-							gaze_on_stim_area_this_frame = True
-				else:  # eye_gaze_only
+		# --- Main classification logic ---
+		if gaze_method == "head_pose_only":
+			if self.calibrated:
+				pitch_ok = self.STIMULUS_PITCH_RANGE[0] <= self.adj_pitch <= self.STIMULUS_PITCH_RANGE[1]
+				yaw_ok = self.STIMULUS_YAW_RANGE[0] <= self.adj_yaw <= self.STIMULUS_YAW_RANGE[1]
+				if pitch_ok and yaw_ok:
 					gaze_on_stim_area_this_frame = True
 
-		elif gaze_method == "head_pose_only":
+		elif gaze_method == "compensatory_gaze":
 			if self.calibrated:
-				gaze_on_stim_area_this_frame = (
-						getattr(self, 'STIMULUS_PITCH_RANGE')[0] <= self.adj_pitch <= getattr(self, 'STIMULUS_PITCH_RANGE')[1] and
-						getattr(self, 'STIMULUS_YAW_RANGE')[0] <= self.adj_yaw <= getattr(self, 'STIMULUS_YAW_RANGE')[1])
+				# This method combines head yaw and eye dx sum.
+				# First, check the simple vertical constraints (pitch and eye dy)
+				pitch_ok = self.COMPENSATORY_HEAD_PITCH_RANGE[0] <= self.adj_pitch <= \
+				           self.COMPENSATORY_HEAD_PITCH_RANGE[1]
 
+				left_dy_ok = self.STIMULUS_LEFT_IRIS_DY_RANGE[0] <= self.l_dy <= self.STIMULUS_LEFT_IRIS_DY_RANGE[1]
+				right_dy_ok = self.STIMULUS_RIGHT_IRIS_DY_RANGE[0] <= self.r_dy <= self.STIMULUS_RIGHT_IRIS_DY_RANGE[1]
+				dy_ok = left_dy_ok and right_dy_ok
+
+				if pitch_ok and dy_ok:
+					head_yaw = self.adj_yaw
+					eye_dx_sum = self.l_dx + self.r_dx
+
+					# Condition 1: Head is centered, eyes are centered
+					head_center_ok = self.COMPENSATORY_HEAD_YAW_RANGE_CENTER[0] <= head_yaw <= \
+					                 self.COMPENSATORY_HEAD_YAW_RANGE_CENTER[1]
+					eyes_center_ok = self.COMPENSATORY_EYE_SUM_RANGE_CENTER[0] <= eye_dx_sum <= \
+					                 self.COMPENSATORY_EYE_SUM_RANGE_CENTER[1]
+
+					# Condition 2: Head is turned left, eyes compensate to the right
+					head_left_ok = self.COMPENSATORY_HEAD_YAW_RANGE_LEFT[0] <= head_yaw <= \
+					               self.COMPENSATORY_HEAD_YAW_RANGE_LEFT[1]
+					eyes_right_comp_ok = self.COMPENSATORY_EYE_SUM_RANGE_LEFT_TURN[0] <= eye_dx_sum <= \
+					                     self.COMPENSATORY_EYE_SUM_RANGE_LEFT_TURN[1]
+
+					# Condition 3: Head is turned right, eyes compensate to the left
+					head_right_ok = self.COMPENSATORY_HEAD_YAW_RANGE_RIGHT[0] <= head_yaw <= \
+					                self.COMPENSATORY_HEAD_YAW_RANGE_RIGHT[1]
+					eyes_left_comp_ok = self.COMPENSATORY_EYE_SUM_RANGE_RIGHT_TURN[0] <= eye_dx_sum <= \
+					                    self.COMPENSATORY_EYE_SUM_RANGE_RIGHT_TURN[1]
+
+					if (head_center_ok and eyes_center_ok) or \
+							(head_left_ok and eyes_right_comp_ok) or \
+							(head_right_ok and eyes_left_comp_ok):
+						gaze_on_stim_area_this_frame = True
+
+		elif "eye_gaze" in gaze_method:  # Catches "eye_gaze_only" and "eye_gaze_with_head_filter"
+			# --- A: Evaluate Eye Gaze component (common to both eye_gaze methods) ---
+			# A.1: Vertical check (dy)
+			left_dy_ok = self.STIMULUS_LEFT_IRIS_DY_RANGE[0] <= self.l_dy <= self.STIMULUS_LEFT_IRIS_DY_RANGE[1]
+			right_dy_ok = self.STIMULUS_RIGHT_IRIS_DY_RANGE[0] <= self.r_dy <= self.STIMULUS_RIGHT_IRIS_DY_RANGE[1]
+			dy_ok = left_dy_ok and right_dy_ok
+
+			# A.2: Horizontal check (dx)
+			dx_ok = False
+			if self.GAZE_DX_SUM_THRESHOLD < 999:  # Correctly checks if the sum method is enabled
+				# New, robust method: Check the sum of horizontal deviations
+				dx_sum = self.l_dx + self.r_dx
+				if abs(dx_sum) <= self.GAZE_DX_SUM_THRESHOLD:
+					dx_ok = True
+			else:
+				# Fallback to original method: Check individual eye ranges
+				left_dx_ok = self.STIMULUS_LEFT_IRIS_DX_RANGE[0] <= self.l_dx <= self.STIMULUS_LEFT_IRIS_DX_RANGE[1]
+				right_dx_ok = self.STIMULUS_RIGHT_IRIS_DX_RANGE[0] <= self.r_dx <= self.STIMULUS_RIGHT_IRIS_DX_RANGE[1]
+				if left_dx_ok and right_dx_ok:
+					dx_ok = True
+
+			eye_gaze_ok = dx_ok and dy_ok
+
+			# --- B: Combine with head pose filter if needed ---
+			if gaze_method == "eye_gaze_with_head_filter":
+				if eye_gaze_ok and self.calibrated:
+					# Use the wider filter ranges for head pose
+					head_pitch_ok = self.HEAD_POSE_FILTER_PITCH_RANGE[0] <= self.adj_pitch <= \
+					                self.HEAD_POSE_FILTER_PITCH_RANGE[1]
+					head_yaw_ok = self.HEAD_POSE_FILTER_YAW_RANGE[0] <= self.adj_yaw <= self.HEAD_POSE_FILTER_YAW_RANGE[
+						1]
+					if head_pitch_ok and head_yaw_ok:
+						gaze_on_stim_area_this_frame = True
+			elif gaze_method == "eye_gaze_only":
+				if eye_gaze_ok:
+					gaze_on_stim_area_this_frame = True
+
+		# --- Finalize and update state for this frame ---
 		if gaze_on_stim_area_this_frame:
 			self.current_trial_data['frames_on_stimulus_area'] += 1
 			self.gaze_on_stimulus_display_text = "GAZE ON STIMULUS"
@@ -797,25 +1098,34 @@ class HeadGazeTracker(object):
 		if self.ENABLE_VIDEO_TRIAL_DETECTION:  # ROI Box and Text
 			x_r, y_r, w_r, h_r = self.STIMULUS_ROI_COORDS
 			cv.rectangle(frame, (x_r, y_r), (min(img_w, x_r + w_r), min(img_h, y_r + h_r)), text_color_cyan, 1)
-			roi_base = f"{self.roi_baseline_brightness:.1f}" if self.roi_baseline_brightness is not None else "Wait"
+
+			# --- THIS IS THE CORRECTED PART ---
+			# It now uses roi_baseline_mean and roi_baseline_std_dev for the display.
+			if self.roi_baseline_mean is not None:
+				roi_base = f"{self.roi_baseline_mean:.1f} (SD:{self.roi_baseline_std_dev:.1f})"
+			else:
+				roi_base = "Wait"
 			roi_text = f"ROI: {self.current_roi_brightness:.1f} (Base: {roi_base})"
+			# --- END OF CORRECTION ---
+
 			(w, _), _ = cv.getTextSize(roi_text, font_face, font_scale_small, font_thickness)
 			cv.putText(frame, roi_text, (tr_x_anchor - w, tr_y_pos), font_face, font_scale_small, text_color_cyan,
 			           font_thickness)
 			tr_y_pos += line_h
 
 		if results_face_mesh and results_face_mesh.multi_face_landmarks:
-			if getattr(self, 'ENABLE_EYE_GAZE_CHECK', False):
-				l_eye_text = f"L Eye D(xy): ({self.l_dx:.1f}, {self.l_dy:.1f})"
-				r_eye_text = f"R Eye D(xy): ({self.r_dx:.1f}, {self.r_dy:.1f})"
-				(w, _), _ = cv.getTextSize(l_eye_text, font_face, font_scale_small, font_thickness)
-				cv.putText(frame, l_eye_text, (tr_x_anchor - w, tr_y_pos), font_face, font_scale_small, text_color_cyan,
-				           font_thickness)
-				tr_y_pos += int(line_h * 0.8)
-				(w, _), _ = cv.getTextSize(r_eye_text, font_face, font_scale_small, font_thickness)
-				cv.putText(frame, r_eye_text, (tr_x_anchor - w, tr_y_pos), font_face, font_scale_small, text_color_cyan,
-				           font_thickness)
-				tr_y_pos += int(line_h * 0.8)
+			# Always show eye gaze coordinates if a face is detected
+			l_eye_text = f"L Eye D(xy): ({self.l_dx:.1f}, {self.l_dy:.1f})"
+			r_eye_text = f"R Eye D(xy): ({self.r_dx:.1f}, {self.r_dy:.1f})"
+			(w, _), _ = cv.getTextSize(l_eye_text, font_face, font_scale_small, font_thickness)
+			cv.putText(frame, l_eye_text, (tr_x_anchor - w, tr_y_pos), font_face, font_scale_small, text_color_cyan,
+			           font_thickness)
+			tr_y_pos += int(line_h * 0.8)
+			(w, _), _ = cv.getTextSize(r_eye_text, font_face, font_scale_small, font_thickness)
+			cv.putText(frame, r_eye_text, (tr_x_anchor - w, tr_y_pos), font_face, font_scale_small, text_color_cyan,
+			           font_thickness)
+			tr_y_pos += int(line_h * 0.8)
+
 			if self.is_looking_down_explicitly:
 				down_text = "Eyes: Explicitly Down"
 				(w, _), _ = cv.getTextSize(down_text, font_face, font_scale_small, font_thickness)
@@ -892,7 +1202,8 @@ class HeadGazeTracker(object):
 		# Effectively, a trial can start soon after the split if conditions are met.
 		self.last_trial_end_time_ms = split_time_ms_absolute - self.MIN_INTER_TRIAL_INTERVAL_MS
 		self.roi_brightness_samples = []
-		self.roi_baseline_brightness = None
+		self.roi_baseline_mean = None
+		self.roi_baseline_std_dev = None
 		if hasattr(self, 'last_trial_result_text'):
 			self.last_trial_result_text = ""
 
@@ -1012,7 +1323,8 @@ class HeadGazeTracker(object):
 			self.all_trials_summary = []
 			self.last_trial_end_time_ms = -self.MIN_INTER_TRIAL_INTERVAL_MS
 			self.roi_brightness_samples = []
-			self.roi_baseline_brightness = None
+			self.roi_baseline_mean = None
+			self.roi_baseline_std_dev = None
 			self.last_trial_result_text = ""
 
 	def _execute_calibration_pass(self):
@@ -1077,15 +1389,24 @@ class HeadGazeTracker(object):
 		"""
 		Main entry point. Orchestrates calibration and analysis passes.
 		"""
-		# --- Pass 1: Pre-computation for Clustering Calibration ---
+		# --- Pass 1: Dynamic ROI Detection (Optional) ---
+		if getattr(self, 'STIMULUS_ROI_METHOD', 'static') == 'dynamic':
+			print("--- Starting Pass 1: Dynamic ROI Detection ---")
+			if not self._find_dynamic_roi():
+				print("Dynamic ROI detection failed. Aborting analysis.")
+				self._cleanup(finalize_data=False)
+				return
+			print("--- Dynamic ROI Detection Complete ---")
+
+		# --- Pass 2: Pre-computation for Clustering Calibration (Optional) ---
 		if self.CALIBRATION_METHOD == 'clustering':
-			print("--- Starting Pass 1: Calibration Data Collection ---")
+			print("--- Starting Pass 2: Calibration Data Collection ---")
 			if not self._execute_calibration_pass():
 				print("Clustering calibration failed. A face may not have been consistently visible.")
 				print("Aborting analysis.")
 				self._cleanup(finalize_data=False)  # Don't save empty logs
 				return
-			print("--- Calibration Complete. Starting Pass 2: Full Analysis ---")
+			print("--- Calibration Complete. Starting Final Pass: Full Analysis ---")
 			self._reset_analysis_state()  # Reset video and state for the main run
 		else:
 			print("--- Starting Single-Pass Analysis ---")
