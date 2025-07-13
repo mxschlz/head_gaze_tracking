@@ -51,7 +51,7 @@ Files:
   # If you need to split a long video into two parts for analysis (e.g., pre/post).
   # Time in milliseconds (ms) at which to split the video.
   # Set to null or remove the line to disable splitting.
-  SPLIT_VIDEO_AT_MS: 655000 # Example: 655 seconds
+  SPLIT_VIDEO_AT_MS: 655000 # Split video if video contains multiple experiments
 
   # --- Output Filename Prefixes & Suffixes ---
   # Base name for the main per-frame data log file.
@@ -151,14 +151,79 @@ Trials:
   ENABLE: True
 
   # --- Trial Onset Detection (via screen brightness) ---
+  # Method for defining the stimulus ROI.
+  # "static": Manually define the coordinates below.
+  # "dynamic": (NEW) Automatically find the ROI at the start of the video.
+  STIMULUS_ROI_METHOD: "dynamic"
+
+  # -- Parameters for "dynamic" ROI detection --
+  DynamicROI:
+    # If VISUALIZE_ROI_SEARCH is True, opens a window during the search pass to show the grid, cell activity, and the final detected ROI. Press any key to continue.
+    VISUALIZE_ROI_SEARCH: True
+    # (NEW) The time in seconds into the video to START searching for the ROI.
+    # Set this to just before you expect the first stimulus to appear.
+    SEARCH_START_SECONDS: 180 # Example: Start search at 3 minutes
+    # Duration (in seconds) at the start of the video to search for the active region.
+    SEARCH_DURATION_SECONDS: 60
+    # How many rows and columns to divide the screen into for analysis.
+    # More divisions are more precise but use more memory. [columns, rows]
+    GRID_DIVISIONS: [30, 25]
+    # (NEW) Threshold for a grid cell to be considered "active".
+    # This is a percentage of the most active cell's variance.
+    # Lower values (e.g., 25) create a larger, more inclusive ROI.
+    # Higher values (e.g., 50) create a tighter, more focused ROI.
+    ACTIVITY_THRESHOLD_PERCENT: 40
+    # (Optional) You can provide a search area [x, y, w, h] to constrain the search
+    # and prevent finding spurious activity in irrelevant parts of the screen.
+    # If commented out, the whole screen is used.
+    SEARCH_AREA: [640, 720, 640, 360]
+    MorphologicalCleaning:
+      ENABLE_CLEANING: True
+      # How many pixels to erode (remove noise). Range: 1-5.
+      ERODE_ITERATIONS: 1
+      # How many pixels to dilate (fill gaps). Range: 1-5.
+      DILATE_ITERATIONS: 2
+      # If True, it finds all separate active regions and keeps only the largest one.
+      KEEP_LARGEST_BLOB_ONLY: True
+
+    # Add padding to the final detected ROI to ensure it fully captures the stimulus.
+    ROIPadding:
+      # If True, the padding logic below will be applied.
+      ENABLE_PADDING: False
+      # Padding to add, as a percentage of the detected ROI's width and height.
+      # A value of 20 means the final ROI will be 20% wider and 20% taller.
+      # This is generally more robust than using fixed pixel padding.
+      PADDING_PERCENTAGE: 20
+
+  # (Used if STIMULUS_ROI_METHOD is "static")
   # Defines the Region of Interest [x, y, width, height] on the video frame to monitor for a stimulus.
   STIMULUS_ROI_COORDS: [820, 630, 300, 300]
+  # --- Trial Onset Detection Method ---
+  # Method for detecting the start of a trial based on ROI brightness.
+  # "statistical": (NEW & RECOMMENDED) Detects a trial if the brightness is a certain
+  #                number of standard deviations above the baseline mean. Most robust.
+  # "factor":      Detects a trial if brightness > (baseline_mean * factor). Good for high contrast.
+  # "absolute":    Detects a trial if brightness > absolute_value. Least robust.
+  TRIAL_ONSET_DETECTION_METHOD: "factor"
+
+  # -- Parameters for "statistical" method --
+  Statistical:
+    # A trial is detected if ROI brightness > (baseline_mean + N * baseline_std_dev).
+    # A value of 3-5 is a good starting point. Higher is less sensitive.
+    ROI_BRIGHTNESS_STD_DEV_THRESHOLD: 4.0
+
+  # -- Parameters for "factor" method --
+  Factor:
+    # A stimulus is detected if the ROI brightness > (baseline * this factor).
+    ROI_BRIGHTNESS_THRESHOLD_FACTOR: 1.5
+
+  # -- Parameters for "absolute" method --
+  Absolute:
+    # Use a fixed brightness threshold (0-255).
+    ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD: 180
+
   # Number of initial non-trial frames used to establish a baseline "dark" screen brightness.
   ROI_BRIGHTNESS_BASELINE_FRAMES: 50
-  # A stimulus is detected if the ROI brightness > (baseline * this factor).
-  ROI_BRIGHTNESS_THRESHOLD_FACTOR: 1.5
-  # (Alternative) Use a fixed brightness threshold (0-255). Less robust than the factor method.
-  # ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD: 180
 
   # --- Trial Timing ---
   # How long the stimulus is considered "on" after initial detection.
@@ -170,23 +235,41 @@ Trials:
 
   # --- Gaze Classification (During Stimulus Period) ---
   # Method to determine if the user is looking at the stimulus.
+  # "compensatory_gaze": (ADVANCED) Checks if eyes compensate for head turns.
+  #                      Use this to capture looks where the head is turned but
+  #                      eyes remain on the stimulus.
   # "eye_gaze_with_head_filter": (RECOMMENDED) Uses iris position but filters out frames
-  #                                where the head is turned too far away. Most accurate.
+  #                                where the head is turned too far away.
   # "eye_gaze_only": Uses only the relative position of the iris in the eye socket.
   # "head_pose_only": Legacy method. Uses only the calibrated head pose angles.
-  GAZE_CLASSIFICATION_METHOD: "head_pose_only"
+  GAZE_CLASSIFICATION_METHOD: "compensatory_gaze"
 
   # Minimum percentage of the STIMULUS_DURATION_MS that gaze must be "on stimulus"
   # for the entire trial to be classified as a "Looked (1)".
   LOOK_TO_STIMULUS_THRESHOLD_PERCENT: 11
 
-  # -- Parameters for "eye_gaze" methods --
-  # Define the "on stimulus" iris position ranges (in pixels, relative to eye corner).
-  # YOU MUST TUNE THESE FOR YOUR SPECIFIC SETUP.
-  STIMULUS_LEFT_IRIS_DX_RANGE: [-20, -10]
-  STIMULUS_LEFT_IRIS_DY_RANGE: [0, 5]
-  STIMULUS_RIGHT_IRIS_DX_RANGE: [10, 20]
-  STIMULUS_RIGHT_IRIS_DY_RANGE: [-5, 0]
+  # -- Parameters for the "compensatory_gaze" method --
+  # This method allows for gaze to be "on stimulus" even if the head is turned,
+  # as long as the eyes are turned in the opposite direction to compensate.
+  # TUNE THESE RANGES BASED ON YOUR SUBJECT'S DATA.
+
+  # Condition 1: Head is looking forward.
+  COMPENSATORY_HEAD_YAW_RANGE_CENTER: [-10, 10]
+  # Required eye gaze sum when head is centered (should be near zero).
+  COMPENSATORY_EYE_SUM_RANGE_CENTER: [-8, 8]
+
+  # Condition 2: Head is turned to the subject's left.
+  COMPENSATORY_HEAD_YAW_RANGE_LEFT: [-30, -15]
+  # Required eye gaze sum for a left head turn (eyes must look right -> positive sum).
+  COMPENSATORY_EYE_SUM_RANGE_LEFT_TURN: [5, 20]
+
+  # Condition 3: Head is turned to the subject's right.
+  COMPENSATORY_HEAD_YAW_RANGE_RIGHT: [15, 30]
+  # Required eye gaze sum for a right head turn (eyes must look left -> negative sum).
+  COMPENSATORY_EYE_SUM_RANGE_RIGHT_TURN: [-20, -5]
+
+  # A general pitch filter is still applied for all conditions.
+  COMPENSATORY_HEAD_PITCH_RANGE: [-15, 15]
 
   # -- Parameters for the "head_filter" --
   # Defines the allowable head pose range (in degrees) for eye gaze to be considered valid.
@@ -197,6 +280,17 @@ Trials:
   # Defines the "on stimulus" head pose range (in degrees from calibrated neutral).
   STIMULUS_PITCH_RANGE: [-10, 10]
   STIMULUS_YAW_RANGE: [-10, 10]
+
+  # -- Parameters for "eye_gaze" methods --
+  # Define the "on stimulus" iris position ranges (in pixels, relative to eye corner).
+  # YOU MUST TUNE THESE FOR YOUR SPECIFIC SETUP.
+  # (New/Recommended) Alternative to DX_RANGE for horizontal gaze classification.
+  # To use this, set a value like 10. To disable and use the old DX_RANGE method, set to 999.
+  GAZE_DX_SUM_THRESHOLD: 999
+  STIMULUS_LEFT_IRIS_DX_RANGE: [-20, -10]
+  STIMULUS_LEFT_IRIS_DY_RANGE: [0, 5]
+  STIMULUS_RIGHT_IRIS_DX_RANGE: [10, 20]
+  STIMULUS_RIGHT_IRIS_DY_RANGE: [-5, 0]
 
   # -- Gaze Refinements --
   # Thresholds to detect an explicit downward look, which helps prevent
