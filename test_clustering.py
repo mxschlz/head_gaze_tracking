@@ -50,15 +50,15 @@ def visualize_clustering_results(pose_data, labels, calculated_baseline):
 
     # Plot the main cluster points
     ax.scatter(pose_data[core_samples_mask, 1], pose_data[core_samples_mask, 0], pose_data[core_samples_mask, 2],
-               c='blue', alpha=0.6, label=f'Main Cluster (n={np.sum(core_samples_mask)})')
+               c='blue', alpha=0.1, label=f'Main Cluster (n={np.sum(core_samples_mask)})')
 
     # Plot the noise points
     ax.scatter(pose_data[noise_mask, 1], pose_data[noise_mask, 0], pose_data[noise_mask, 2],
-               c='grey', alpha=0.3, s=10, label=f'Noise (n={np.sum(noise_mask)})')
+               c='grey', alpha=0.1, s=5, label=f'Noise (n={np.sum(noise_mask)})')
 
     # Plot the baseline calculated by our algorithm
     ax.scatter(calculated_baseline[1], calculated_baseline[0], calculated_baseline[2],
-               c='red', s=200, marker='X', edgecolor='black', label='Calculated Baseline')
+               c='red', s=350, marker='X', edgecolor='black', label='Calculated Baseline')
 
     ax.set_title('DBSCAN Clustering on Real Video Data', fontsize=16)
     ax.set_xlabel('Yaw (degrees)')
@@ -111,7 +111,7 @@ def main():
         sys.exit(1)
 
     frame_limit = tracker.CLUSTERING_CALIB_DURATION_FRAMES
-    print(f"\nProcessing video for {tracker.CLUSTERING_CALIB_DURATION_SECONDS} seconds ({frame_limit} frames)...")
+    print(f"\nProcessing video for {tracker.CLUSTERING_CALIB_DURATION_FRAMES} seconds ({frame_limit} frames)...")
 
     frame_num = 0
     while cap.isOpened() and frame_num < frame_limit:
