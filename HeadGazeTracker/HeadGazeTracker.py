@@ -552,7 +552,7 @@ class HeadGazeTracker(object):
 				cv.rectangle(viz_img, (orig_roi_x, orig_roi_y), (orig_roi_x + orig_roi_w, orig_roi_y + orig_roi_h), (0, 255, 255), 2)
 				cv.putText(viz_img, "Detected Box", (orig_roi_x + 5, orig_roi_y - 10), cv.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 			cv.rectangle(viz_img, (roi_x, roi_y), (roi_x + roi_w, roi_y + roi_h), (0, 0, 255), 3)
-			cv.putText(viz_img, "Final Padded ROI", (roi_x + 5, roi_y + 30), cv.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+			cv.putText(viz_img, "Final ROI", (roi_x + 5, roi_y + 30), cv.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 			cv.imshow("Dynamic ROI Search Visualization", viz_img)
 			print("\n--- ROI VISUALIZATION ---")
 			print("Showing visualization of the ROI search. Press any key in the window to continue...")
@@ -1125,6 +1125,17 @@ class HeadGazeTracker(object):
 			cv.putText(frame, r_eye_text, (tr_x_anchor - w, tr_y_pos), font_face, font_scale_small, text_color_cyan,
 			           font_thickness)
 			tr_y_pos += int(line_h * 0.8)
+
+			# --- ADDED FOR DEBUGGING ---
+			# Calculate and display the sum of eye coordinates
+			eye_dx_sum = self.l_dx + self.r_dx
+			eye_dy_sum = self.l_dy + self.r_dy
+			sum_text = f"Eye Sum D(xy): ({eye_dx_sum:.1f}, {eye_dy_sum:.1f})"
+			(w, _), _ = cv.getTextSize(sum_text, font_face, font_scale_small, font_thickness)
+			cv.putText(frame, sum_text, (tr_x_anchor - w, tr_y_pos), font_face, font_scale_small, text_color_yellow,
+			           font_thickness)
+			tr_y_pos += int(line_h * 0.8)
+			# --- END OF ADDED CODE ---
 
 			if self.is_looking_down_explicitly:
 				down_text = "Eyes: Explicitly Down"
