@@ -1,12 +1,14 @@
 from HeadGazeTracker.HeadGazeTracker import HeadGazeTracker
+from HeadGazeTracker import get_data_path
 
 
 # setup
-subject = "SMS019_A"  # subject id
-video_input = f"/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/baby_vids/input/{subject}_Video.mkv"  # if webcam==None, use this variable as video input
+subject = "SMS019"  # subject id
+session = "A"
+video_input = f"{get_data_path()}input\\{subject}_EEG\\video\\{subject}_{session}.mkv"  # if webcam==None, use this variable as video input
+video_output = f"{get_data_path()}output\\{subject}_processed_video_output.mkv"
 webcam = None # can be 0 or None
-video_output = f"/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/baby_vids/output/{subject}_processed_video_output.mkv"
-tracking_data_log_folder = f"/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/baby_vids/logs/"
+tracking_data_log_folder = f"{get_data_path()}/logs/"
 tracker = HeadGazeTracker(subject_id=subject, config_file_path="config.yml", WEBCAM=webcam,
                           VIDEO_INPUT=video_input,
                           VIDEO_OUTPUT=video_output,
