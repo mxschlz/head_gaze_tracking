@@ -760,6 +760,68 @@ class HeadGazeTracker(object):
 			print(f"Calibration completed via clustering.")
 			print(f"New Initial Pose: P={self.initial_pitch:.1f}, Y={self.initial_yaw:.1f}, R={self.initial_roll:.1f}")
 
+	def find_first_stimulus_onset(self):
+		"""
+		Performs a fast pass over the video to find the frame number and timestamp
+		of the first stimulus onset based on ROI brightness.
+
+		Returns:
+			A tuple (frame_number, timestamp_ms) if a stimulus is found.
+			A tuple (None, None) if no stimulus is found or an error occurs.
+		"""
+		if not self.ENABLE_VIDEO_TRIAL_DETECTION:
+			print("Error: `ENABLE_VIDEO_TRIAL_DETECTION` must be true in config to find stimulus onset.")
+			return None, None
+
+		print("--- Starting Fast Pass: Searching for first stimulus onset ---")
+		self._reset_analysis_state()  # Ensure a clean state
+
+		frame_count = -1
+		try:
+			while self.cap.isOpened():
+				frame_count += 1
+				frame, img_h, img_w, ret = self._get_and_preprocess_frame()
+				if not ret:
+					print("Video ended before any stimulus was detected.")
+					return None, None
+
+				current_frame_time_ms = int(frame_count * (1000.0 / self.FPS))
+
+				# --- Simplified Trial Detection Logic ---
+				self.current_roi_brightness = self._calculate_roi_brightness(frame, img_h, img_w)
+
+				# 1. Collect baseline
+				if self.roi_baseline_mean is None:
+					if len(self.roi_brightness_samples) < self.ROI_BRIGHTNESS_BASELINE_FRAMES:
+						self.roi_brightness_samples.append(self.current_roi_brightness)
+					else:
+						self.roi_baseline_mean = np.mean(self.roi_brightness_samples)
+						self.roi_baseline_std_dev = np.std(self.roi_brightness_samples)
+						if self.roi_baseline_std_dev < 0.5: self.roi_baseline_std_dev = 0.5
+						if self.PRINT_DATA:
+							print(f"ROI Baseline Calculated: Mean={self.roi_baseline_mean:.2f}, SD={self.roi_baseline_std_dev:.2f}")
+					continue # Continue to next frame while collecting baseline
+
+				# 2. Detect stimulus (copied from _update_trial_state)
+				stimulus_detected = False
+				method = getattr(self, "TRIAL_ONSET_DETECTION_METHOD", "factor")
+				if method == "factor":
+					threshold = self.roi_baseline_mean * getattr(self, "ROI_BRIGHTNESS_THRESHOLD_FACTOR", 1.5)
+					if self.current_roi_brightness > threshold: stimulus_detected = True
+				elif method == "absolute":
+					threshold = getattr(self, "ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD", 255)
+					if self.current_roi_brightness > threshold: stimulus_detected = True
+				# (Statistical method could be added here if needed)
+
+				# 3. If detected, we're done!
+				if stimulus_detected:
+					print(f"--- First stimulus detected at frame {frame_count} ({current_frame_time_ms} ms) ---")
+					return frame_count, current_frame_time_ms
+
+		finally:
+			self.cap.release()
+			self._reset_analysis_state() # Reset again so a subsequent .run() call starts fresh
+
 	def _get_face_looks_text(self):
 		angle_y = self.adj_yaw if self.calibrated else self.smooth_yaw
 		angle_x = self.adj_pitch if self.calibrated else self.smooth_pitch
