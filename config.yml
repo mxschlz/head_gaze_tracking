@@ -17,6 +17,7 @@ System:
   # Set to False for "headless" batch processing to gain a significant speed boost.
   SHOW_ON_SCREEN_DATA: True
 
+  # TODO: not yet implemented
   # --- Performance Tuning ---
   # To improve speed, you can process a subset of frames.
   # 1 = Process every frame (most detailed, slowest).
@@ -51,7 +52,7 @@ Files:
   # If you need to split a long video into two parts for analysis (e.g., pre/post).
   # Time in milliseconds (ms) at which to split the video.
   # Set to null or remove the line to disable splitting.
-  SPLIT_VIDEO_AT_MS: 655000 # Split video if video contains multiple experiments
+  SPLIT_VIDEO_AT_MS: null # Split video if video contains multiple experiments
 
   # --- Output Filename Prefixes & Suffixes ---
   # Base name for the main per-frame data log file.
@@ -162,7 +163,7 @@ Trials:
     VISUALIZE_ROI_SEARCH: True
     # (NEW) The time in seconds into the video to START searching for the ROI.
     # Set this to just before you expect the first stimulus to appear.
-    SEARCH_START_SECONDS: 180 # Example: Start search at 3 minutes
+    SEARCH_START_SECONDS: 30 # Example: Start search at 3 minutes
     # Duration (in seconds) at the start of the video to search for the active region.
     SEARCH_DURATION_SECONDS: 60
     # How many rows and columns to divide the screen into for analysis.
@@ -172,7 +173,7 @@ Trials:
     # This is a percentage of the most active cell's variance.
     # Lower values (e.g., 25) create a larger, more inclusive ROI.
     # Higher values (e.g., 50) create a tighter, more focused ROI.
-    ACTIVITY_THRESHOLD_PERCENT: 40
+    ACTIVITY_THRESHOLD_PERCENT: 50
     # (Optional) You can provide a search area [x, y, w, h] to constrain the search
     # and prevent finding spurious activity in irrelevant parts of the screen.
     # If commented out, the whole screen is used.
@@ -189,11 +190,11 @@ Trials:
     # Add padding to the final detected ROI to ensure it fully captures the stimulus.
     ROIPadding:
       # If True, the padding logic below will be applied.
-      ENABLE_PADDING: False
+      ENABLE_PADDING: True
       # Padding to add, as a percentage of the detected ROI's width and height.
       # A value of 20 means the final ROI will be 20% wider and 20% taller.
       # This is generally more robust than using fixed pixel padding.
-      PADDING_PERCENTAGE: 20
+      PADDING_PERCENTAGE: 0
 
   # (Used if STIMULUS_ROI_METHOD is "static")
   # Defines the Region of Interest [x, y, width, height] on the video frame to monitor for a stimulus.
@@ -210,7 +211,13 @@ Trials:
   Statistical:
     # A trial is detected if ROI brightness > (baseline_mean + N * baseline_std_dev).
     # A value of 3-5 is a good starting point. Higher is less sensitive.
-    ROI_BRIGHTNESS_STD_DEV_THRESHOLD: 4.0
+    ROI_BRIGHTNESS_STD_DEV_THRESHOLD: 10.0
+
+    # (NEW & RECOMMENDED) To prevent false positives on very dark/stable baselines, this
+    # adds a minimum factor. The final threshold will be the HIGHER of the statistical
+    # calculation and (baseline_mean * this factor).
+    # Set to 1.0 to disable. For high-contrast stimuli, 2.0 or 3.0 is a good start.
+    ROI_BRIGHTNESS_MIN_FACTOR: 1.5
 
   # -- Parameters for "factor" method --
   Factor:
@@ -223,7 +230,7 @@ Trials:
     ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD: 180
 
   # Number of initial non-trial frames used to establish a baseline "dark" screen brightness.
-  ROI_BRIGHTNESS_BASELINE_FRAMES: 50
+  ROI_BRIGHTNESS_BASELINE_FRAMES: 5
 
   # --- Trial Timing ---
   # How long the stimulus is considered "on" after initial detection.
@@ -232,6 +239,10 @@ Trials:
   POST_STIMULUS_TRIAL_DURATION_MS: 0
   # Minimum time required between the end of one trial and the start of the next.
   MIN_INTER_TRIAL_INTERVAL_MS: 1000
+
+  # Minimum percentage of the STIMULUS_DURATION_MS that gaze must be "on stimulus"
+  # for the entire trial to be classified as a "Looked (1)".
+  LOOK_TO_STIMULUS_THRESHOLD_PERCENT: 11
 
   # --- Gaze Classification (During Stimulus Period) ---
   # Method to determine if the user is looking at the stimulus.
@@ -242,11 +253,7 @@ Trials:
   #                                where the head is turned too far away.
   # "eye_gaze_only": Uses only the relative position of the iris in the eye socket.
   # "head_pose_only": Legacy method. Uses only the calibrated head pose angles.
-  GAZE_CLASSIFICATION_METHOD: "compensatory_gaze"
-
-  # Minimum percentage of the STIMULUS_DURATION_MS that gaze must be "on stimulus"
-  # for the entire trial to be classified as a "Looked (1)".
-  LOOK_TO_STIMULUS_THRESHOLD_PERCENT: 11
+  GAZE_CLASSIFICATION_METHOD: "head_pose_only"
 
   # -- Parameters for the "compensatory_gaze" method --
   # This method allows for gaze to be "on stimulus" even if the head is turned,
@@ -256,17 +263,17 @@ Trials:
   # Condition 1: Head is looking forward.
   COMPENSATORY_HEAD_YAW_RANGE_CENTER: [-10, 10]
   # Required eye gaze sum when head is centered (should be near zero).
-  COMPENSATORY_EYE_SUM_RANGE_CENTER: [-8, 8]
+  COMPENSATORY_EYE_SUM_RANGE_CENTER: [-9, 9]
 
   # Condition 2: Head is turned to the subject's left.
-  COMPENSATORY_HEAD_YAW_RANGE_LEFT: [-30, -15]
+  COMPENSATORY_HEAD_YAW_RANGE_LEFT: [-70, -15]
   # Required eye gaze sum for a left head turn (eyes must look right -> positive sum).
-  COMPENSATORY_EYE_SUM_RANGE_LEFT_TURN: [5, 20]
+  COMPENSATORY_EYE_SUM_RANGE_LEFT_TURN: [-10, 10]
 
   # Condition 3: Head is turned to the subject's right.
-  COMPENSATORY_HEAD_YAW_RANGE_RIGHT: [15, 30]
+  COMPENSATORY_HEAD_YAW_RANGE_RIGHT: [15, 70]
   # Required eye gaze sum for a right head turn (eyes must look left -> negative sum).
-  COMPENSATORY_EYE_SUM_RANGE_RIGHT_TURN: [-20, -5]
+  COMPENSATORY_EYE_SUM_RANGE_RIGHT_TURN: [-10, 10]
 
   # A general pitch filter is still applied for all conditions.
   COMPENSATORY_HEAD_PITCH_RANGE: [-15, 15]
