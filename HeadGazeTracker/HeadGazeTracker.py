@@ -518,7 +518,7 @@ class HeadGazeTracker(object):
 		padding_config = getattr(self, "ROIPadding", {})
 		if padding_config.get("ENABLE_PADDING", False):
 			padding_percent = padding_config.get("PADDING_PERCENTAGE", 0)
-			if padding_percent > 0:
+			if padding_percent != 0: # Allow both positive (expand) and negative (shrink) padding
 				orig_roi_x, orig_roi_y, orig_roi_w, orig_roi_h = roi_x, roi_y, roi_w, roi_h
 				pad_w = int(roi_w * (padding_percent / 100.0))
 				pad_h = int(roi_h * (padding_percent / 100.0))
@@ -531,7 +531,9 @@ class HeadGazeTracker(object):
 				roi_y = max(0, roi_y)
 				if roi_x + roi_w > img_w_total: roi_w = img_w_total - roi_x
 				if roi_y + roi_h > img_h_total: roi_h = img_h_total - roi_y
-				if self.PRINT_DATA: print(f"Applied {padding_percent}% padding. ROI expanded.")
+				if self.PRINT_DATA:
+					action = "expanded" if padding_percent > 0 else "shrunk"
+					print(f"Applied {padding_percent}% padding. ROI {action}.")
 
 		# --- 9. Finalize and Visualize ---
 		self.STIMULUS_ROI_COORDS = [roi_x, roi_y, roi_w, roi_h]
@@ -801,7 +803,8 @@ class HeadGazeTracker(object):
 					if self.roi_baseline_std_dev < 0.5:
 						self.roi_baseline_std_dev = 0.5
 					if self.PRINT_DATA:
-						print(f"ROI Baseline Calculated: Mean={self.roi_baseline_mean:.2f}, SD={self.roi_baseline_std_dev:.2f}")
+						print(
+							f"ROI Baseline Calculated: Mean={self.roi_baseline_mean:.2f}, SD={self.roi_baseline_std_dev:.2f}")
 			else:
 				# If we are in a trial before baseline is set, do nothing.
 				pass
@@ -813,10 +816,20 @@ class HeadGazeTracker(object):
 			method = getattr(self, "TRIAL_ONSET_DETECTION_METHOD", "factor")
 
 			if method == "statistical":
-				std_dev_threshold = getattr(self, "ROI_BRIGHTNESS_STD_DEV_THRESHOLD", 4.0)
-				threshold = self.roi_baseline_mean + (std_dev_threshold * self.roi_baseline_std_dev)
-				if self.current_roi_brightness > threshold:
+				# Get the statistical threshold (N * std_dev)
+				std_dev_multiplier = getattr(self, "ROI_BRIGHTNESS_STD_DEV_THRESHOLD", 5.0)
+				statistical_threshold = self.roi_baseline_mean + (std_dev_multiplier * self.roi_baseline_std_dev)
+
+				# Get the minimum factor threshold as a safety net
+				min_factor = getattr(self, "ROI_BRIGHTNESS_MIN_FACTOR", 1.0)  # Default to 1.0 (no effect)
+				factor_threshold = self.roi_baseline_mean * min_factor
+
+				# The final threshold is the greater of the two, ensuring robustness.
+				final_threshold = max(statistical_threshold, factor_threshold)
+
+				if self.current_roi_brightness > final_threshold:
 					stimulus_detected = True
+
 			elif method == "factor":
 				factor = getattr(self, "ROI_BRIGHTNESS_THRESHOLD_FACTOR", 1.5)
 				threshold = self.roi_baseline_mean * factor
@@ -831,7 +844,8 @@ class HeadGazeTracker(object):
 		trial_can_start = (current_frame_time_ms >= self.last_trial_end_time_ms + self.MIN_INTER_TRIAL_INTERVAL_MS)
 
 		# If a stimulus is detected and we can start a new trial...
-		if trial_can_start and stimulus_detected and not (self.current_trial_data and self.current_trial_data['active']):
+		if trial_can_start and stimulus_detected and not (
+				self.current_trial_data and self.current_trial_data['active']):
 			self.trial_counter += 1
 			start_t = current_frame_time_ms
 			stim_end_t = start_t + self.STIMULUS_DURATION_MS
@@ -842,13 +856,15 @@ class HeadGazeTracker(object):
 				'active': True, 'stimulus_frames_processed_gaze': 0,
 				'frames_on_stimulus_area': 0, 'looked_final': 2}
 			if self.PRINT_DATA:
-				print(f"Trial {self.trial_counter} START @{start_t}ms (Part {self.current_video_part}). ROI Bright: {self.current_roi_brightness:.2f}")
+				print(
+					f"Trial {self.trial_counter} START @{start_t}ms (Part {self.current_video_part}). ROI Bright: {self.current_roi_brightness:.2f}")
 
 		# If a trial is currently active, check if it should end.
 		if self.current_trial_data and self.current_trial_data['active']:
 			if current_frame_time_ms >= self.current_trial_data['trial_end_time_ms']:
 				if self.PRINT_DATA:
-					print(f"Trial {self.current_trial_data['id']} END @{current_frame_time_ms}ms (Part {self.current_video_part}).")
+					print(
+						f"Trial {self.current_trial_data['id']} END @{current_frame_time_ms}ms (Part {self.current_video_part}).")
 
 				# Finalize trial classification (looked vs. away)
 				if self.current_trial_data['stimulus_frames_processed_gaze'] > 0:
