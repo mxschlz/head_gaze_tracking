@@ -8,6 +8,7 @@ from mpl_toolkits.mplot3d import Axes3D  # Required for 3D plotting
 
 # We need to import the tracker class itself
 from HeadGazeTracker.HeadGazeTracker import HeadGazeTracker
+from HeadGazeTracker import get_data_path
 
 def find_baseline_with_dbscan(pose_data, eps, min_samples):
     """
@@ -74,7 +75,7 @@ def main():
     # --- 1. Configuration ---
     # EDIT THE VARIABLES BELOW TO POINT TO YOUR VIDEO AND CONFIG
     # --------------------------------------------------------------------
-    VIDEO_INPUT_PATH = "/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/baby_vids/input/SMS019_A_Video.mkv"
+    VIDEO_INPUT_PATH = f"{get_data_path()}input\\SMS019_EEG\\video\\SMS019_A.mkv"
     CONFIG_FILE_PATH = "config.yml"
     # --------------------------------------------------------------------
 
