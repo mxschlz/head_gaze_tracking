@@ -3,20 +3,21 @@ from HeadGazeTracker import get_data_path
 from datetime import datetime, timedelta
 import re
 import os
+import pathlib
 
 # setup
 subject = "SMS019"  # subject id
 session = "A"
 CONFIG_FILE = "config.yml"
-video_input = f"{get_data_path()}input\\{subject}_EEG\\video\\{subject}_{session}.mkv"  # if webcam==None, use this variable as video input
+video_input = pathlib.Path(f"{get_data_path()}input/{subject}_EEG/video/{subject}_{session}.mkv")  # if webcam==None, use this variable as video input
 webcam = None # can be 0 or None
-video_output = f"{get_data_path()}output\\{subject}_processed_video_output.mkv"
-tracking_data_log_folder = f"{get_data_path()}logs\\"
+video_output = pathlib.Path(f"{get_data_path()}output/{subject}_{session}_processed_video_output.mkv")
+tracking_data_log_folder = pathlib.Path(f"{get_data_path()}logs/")
 
 # --- EEG Log File Setup (for BrainVision .vmrk files) ---
-eeg_base_path = f"{get_data_path()}input\\{subject}_EEG\\{session}"
-EEG_HEADER_FILE = os.path.join(eeg_base_path, f"{subject}_{session}_EEG.vhdr")
-EEG_MARKER_FILE = os.path.join(eeg_base_path, f"{subject}_{session}_EEG.vmrk")
+eeg_base_path = pathlib.Path(f"{get_data_path()}input/{subject}_EEG/{session}")
+EEG_HEADER_FILE = pathlib.Path(os.path.join(eeg_base_path, f"{subject}_{session}_EEG.vhdr"))
+EEG_MARKER_FILE = pathlib.Path(os.path.join(eeg_base_path, f"{subject}_{session}_EEG.vmrk"))
 
 # The description of the stimulus marker to search for in the .vmrk file.
 # For "Mk2=Stimulus,S 10,..." this would be "Stimulus".
@@ -129,7 +130,8 @@ def main():
             VIDEO_INPUT=video_input,
             VIDEO_OUTPUT=video_output,
             TRACKING_DATA_LOG_FOLDER=tracking_data_log_folder,
-            starting_timestamp=video_start_timestamp_str  # Pass the aligned timestamp here!
+            starting_timestamp=video_start_timestamp_str,  # Pass the aligned timestamp here!,
+	        WEBCAM=None
         )
         full_analysis_tracker.run()
     except Exception as e:
