@@ -21,7 +21,8 @@ drawing_spec = mp_drawing.DrawingSpec(thickness=1, circle_radius=0)
 
 class HeadGazeTracker(object):
 	def __init__(self, subject_id=None, config_file_path="config.yaml", VIDEO_INPUT=None, VIDEO_OUTPUT=None, WEBCAM=0,
-	             TRACKING_DATA_LOG_FOLDER=None, starting_timestamp=None, total_frames=None):
+	             TRACKING_DATA_LOG_FOLDER=None, starting_timestamp=None, total_frames=None,
+	             eeg_trial_onsets_ms=None):
 		# 1. Load all parameters from the YAML file into class attributes
 		self.load_config(file_path=config_file_path)
 
@@ -136,6 +137,12 @@ class HeadGazeTracker(object):
 			self.starting_timestamp = datetime.now()
 		else:
 			self.starting_timestamp = datetime.strptime(str(starting_timestamp), self.TIMESTAMP_FORMAT)
+
+		# 10. Set up externally provided trial onsets
+		self.eeg_trial_onsets_ms = eeg_trial_onsets_ms
+		if self.eeg_trial_onsets_ms:
+			self.next_eeg_trial_index = 0
+			print(f"Received {len(self.eeg_trial_onsets_ms)} trial onsets from EEG data. Video trial detection will be bypassed.")
 
 	def _reset_per_frame_state(self):
 		"""Resets variables that store state for the current frame."""
@@ -773,6 +780,29 @@ class HeadGazeTracker(object):
 			print("Error: `ENABLE_VIDEO_TRIAL_DETECTION` must be true in config to find stimulus onset.")
 			return None, None
 
+		# --- NEW: Perform Clustering Calibration if configured, just like the main run() method ---
+		# This ensures that if the main analysis relies on a calibrated pose, the same
+		# calibration is available and consistent from the very beginning.
+		if self.CALIBRATION_METHOD == 'clustering':
+			print("--- Running Clustering Calibration as part of stimulus onset search ---")
+			if not self._execute_calibration_pass():
+				print("Clustering calibration failed during stimulus search. Aborting.")
+				self._cleanup(finalize_data=False)
+				return None, None
+			# CRITICAL FIX: The calibration pass releases the video capture.
+			# We must re-initialize it before the next step.
+			print("Re-initializing video capture after calibration pass...")
+			self.cap = self.init_video_input()
+
+		# --- NEW: Perform Dynamic ROI search if configured, just like the main run() method ---
+		# This ensures the ROI used for finding the first stimulus is the same one used for the full analysis.
+		if getattr(self, 'STIMULUS_ROI_METHOD', 'static') == 'dynamic':
+			print("--- Running Dynamic ROI Detection for stimulus onset search ---")
+			if not self._find_dynamic_roi():
+				print("Dynamic ROI detection failed during stimulus search. Aborting.")
+				self._cleanup(finalize_data=False)
+				return None, None
+
 		print("--- Starting Fast Pass: Searching for first stimulus onset ---")
 		self._reset_analysis_state()  # Ensure a clean state
 
@@ -811,7 +841,20 @@ class HeadGazeTracker(object):
 				elif method == "absolute":
 					threshold = getattr(self, "ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD", 255)
 					if self.current_roi_brightness > threshold: stimulus_detected = True
-				# (Statistical method could be added here if needed)
+				elif method == "statistical":
+					# Get the statistical threshold (N * std_dev)
+					std_dev_multiplier = getattr(self, "ROI_BRIGHTNESS_STD_DEV_THRESHOLD", 5.0)
+					statistical_threshold = self.roi_baseline_mean + (std_dev_multiplier * self.roi_baseline_std_dev)
+
+					# Get the minimum factor threshold as a safety net
+					min_factor = getattr(self, "ROI_BRIGHTNESS_MIN_FACTOR", 1.0)  # Default to 1.0 (no effect)
+					factor_threshold = self.roi_baseline_mean * min_factor
+
+					# The final threshold is the greater of the two, ensuring robustness.
+					final_threshold = max(statistical_threshold, factor_threshold)
+
+					if self.current_roi_brightness > final_threshold:
+						stimulus_detected = True
 
 				# 3. If detected, we're done!
 				if stimulus_detected:
@@ -819,8 +862,11 @@ class HeadGazeTracker(object):
 					return frame_count, current_frame_time_ms
 
 		finally:
-			self.cap.release()
-			self._reset_analysis_state() # Reset again so a subsequent .run() call starts fresh
+			# --- MODIFICATION ---
+			# Instead of tearing down, reset the video to the beginning and clear
+			# only the trial state, preserving the calibration and ROI results.
+			print("First stimulus found. Resetting video to frame 0 for main analysis pass.")
+			self._reset_for_main_pass()
 
 	def _get_face_looks_text(self):
 		angle_y = self.adj_yaw if self.calibrated else self.smooth_yaw
@@ -941,6 +987,36 @@ class HeadGazeTracker(object):
 				self.all_trials_summary.append(self.current_trial_data.copy())
 				self.last_trial_end_time_ms = self.current_trial_data['trial_end_time_ms']
 				self.current_trial_data = None
+
+	def _check_for_eeg_trial_onset(self, current_frame_time_ms):
+		"""
+		Checks if the current frame time triggers a pre-defined EEG trial onset.
+		This bypasses video-based detection.
+		"""
+		if not self.eeg_trial_onsets_ms or self.next_eeg_trial_index >= len(self.eeg_trial_onsets_ms):
+			return # No more EEG trials to process
+
+		# Get the timestamp of the next scheduled trial
+		next_trial_start_ms = self.eeg_trial_onsets_ms[self.next_eeg_trial_index]
+
+		# Check if a trial is already active or if it's too soon to start another
+		trial_can_start = (current_frame_time_ms >= self.last_trial_end_time_ms + self.MIN_INTER_TRIAL_INTERVAL_MS)
+		is_new_trial = not (self.current_trial_data and self.current_trial_data['active'])
+
+		# If the current frame time has reached or passed the next trial's start time
+		if trial_can_start and is_new_trial and current_frame_time_ms >= next_trial_start_ms:
+			self.trial_counter += 1
+			start_t = next_trial_start_ms # Use the precise EEG time
+			stim_end_t = start_t + self.STIMULUS_DURATION_MS
+			trial_end_t = stim_end_t + self.POST_STIMULUS_TRIAL_DURATION_MS
+			self.current_trial_data = {
+				'id': self.trial_counter, 'start_time_ms': start_t,
+				'stimulus_end_time_ms': stim_end_t, 'trial_end_time_ms': trial_end_t,
+				'active': True, 'stimulus_frames_processed_gaze': 0,
+				'frames_on_stimulus_area': 0, 'looked_final': 2}
+			self.next_eeg_trial_index += 1 # Move to the next trial in the list
+			if self.PRINT_DATA:
+				print(f"EEG Trial {self.trial_counter} START @{start_t}ms (Part {self.current_video_part}).")
 
 	def _classify_gaze_for_current_trial(self, current_frame_time_ms):
 		"""
@@ -1416,6 +1492,28 @@ class HeadGazeTracker(object):
 			self.roi_baseline_std_dev = None
 			self.last_trial_result_text = ""
 
+	def _reset_for_main_pass(self):
+		"""
+		Resets the tracker state after a pre-analysis pass (like find_first_stimulus_onset)
+		but preserves the results of calibration and ROI detection.
+		"""
+		if self.cap and self.cap.isOpened():
+			self.cap.set(cv.CAP_PROP_POS_FRAMES, 0)
+
+		# Reset only the data accumulators and trial-specific state
+		self.TOTAL_BLINKS = 0
+		self.EYES_BLINK_FRAME_COUNTER = 0
+		self.csv_data = []
+		self.angle_buffer = AngleBuffer(size=self.MOVING_AVERAGE_WINDOW)
+
+		if self.ENABLE_VIDEO_TRIAL_DETECTION:
+			self.trial_counter = 0
+			self.current_trial_data = None
+			self.all_trials_summary = []
+			self.last_trial_end_time_ms = -self.MIN_INTER_TRIAL_INTERVAL_MS
+			self.roi_brightness_samples = []
+			self.roi_baseline_mean = None
+
 	def _execute_calibration_pass(self):
 		"""
 		First pass over the video to collect head pose data and perform clustering calibration.
@@ -1544,8 +1642,14 @@ class HeadGazeTracker(object):
 						self.face_looks_display_text = self._get_face_looks_text()
 
 				if self.ENABLE_VIDEO_TRIAL_DETECTION:
-					self.current_roi_brightness = self._calculate_roi_brightness(frame, img_h, img_w)
-					self._update_trial_state(current_frame_time_ms)
+					# If EEG onsets are provided, use them. Otherwise, fall back to video detection.
+					if self.eeg_trial_onsets_ms:
+						self._check_for_eeg_trial_onset(current_frame_time_ms)
+					else:
+						self.current_roi_brightness = self._calculate_roi_brightness(frame, img_h, img_w)
+						self._update_trial_state(current_frame_time_ms)
+
+					# This part runs for both methods if a trial becomes active
 					if self.current_trial_data and self.current_trial_data['active'] and \
 							results_face_mesh and results_face_mesh.multi_face_landmarks:
 						self._classify_gaze_for_current_trial(current_frame_time_ms)
