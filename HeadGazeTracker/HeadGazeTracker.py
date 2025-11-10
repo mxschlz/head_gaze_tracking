@@ -103,8 +103,8 @@ class HeadGazeTracker(object):
 		# 6. Setup Calibration
 		self.CALIBRATION_METHOD = getattr(self, "METHOD", "manual")
 		self.auto_calibrate_pending = self.CALIBRATION_METHOD in ["clustering", "gaze_informed"]
-		calib_duration_sec = getattr(self, "DURATION_SECONDS", 30)
-		self.CLUSTERING_CALIB_DURATION_FRAMES = int(calib_duration_sec * self.FPS)
+		self.calib_duration_sec = getattr(self, "CLUSTERING_CALIB_DURATION_SECONDS", 30)
+		self.CLUSTERING_CALIB_DURATION_FRAMES = int(self.calib_duration_sec * self.FPS)
 		self.clustering_calib_all_samples = []
 		self.head_pose_calibration_samples = {'pitch': [], 'yaw': [], 'roll': []}
 		self.head_pose_calibration_frame_counter = 0
