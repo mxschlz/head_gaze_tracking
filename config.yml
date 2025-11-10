@@ -124,7 +124,7 @@ Calibration:
   METHOD: "clustering"
 
   # Duration in seconds at the start of the video to use for automatic calibration.
-  DURATION_SECONDS: 60
+  CLUSTERING_CALIB_DURATION_SECONDS: 5
 
   # --- Settings for "clustering" method ---
   Clustering:
@@ -163,9 +163,9 @@ Trials:
     VISUALIZE_ROI_SEARCH: True
     # (NEW) The time in seconds into the video to START searching for the ROI.
     # Set this to just before you expect the first stimulus to appear.
-    SEARCH_START_SECONDS: 30 # Example: Start search at 3 minutes
+    SEARCH_START_SECONDS: 300 # Example: Start search at 3 minutes
     # Duration (in seconds) at the start of the video to search for the active region.
-    SEARCH_DURATION_SECONDS: 60
+    SEARCH_DURATION_SECONDS: 5
     # How many rows and columns to divide the screen into for analysis.
     # More divisions are more precise but use more memory. [columns, rows]
     GRID_DIVISIONS: [30, 25]
@@ -205,19 +205,19 @@ Trials:
   #                number of standard deviations above the baseline mean. Most robust.
   # "factor":      Detects a trial if brightness > (baseline_mean * factor). Good for high contrast.
   # "absolute":    Detects a trial if brightness > absolute_value. Least robust.
-  TRIAL_ONSET_DETECTION_METHOD: "factor"
+  TRIAL_ONSET_DETECTION_METHOD: "statistical"
 
   # -- Parameters for "statistical" method --
   Statistical:
     # A trial is detected if ROI brightness > (baseline_mean + N * baseline_std_dev).
     # A value of 3-5 is a good starting point. Higher is less sensitive.
-    ROI_BRIGHTNESS_STD_DEV_THRESHOLD: 10.0
+    ROI_BRIGHTNESS_STD_DEV_THRESHOLD: 1.0
 
     # (NEW & RECOMMENDED) To prevent false positives on very dark/stable baselines, this
     # adds a minimum factor. The final threshold will be the HIGHER of the statistical
     # calculation and (baseline_mean * this factor).
     # Set to 1.0 to disable. For high-contrast stimuli, 2.0 or 3.0 is a good start.
-    ROI_BRIGHTNESS_MIN_FACTOR: 1.5
+    ROI_BRIGHTNESS_MIN_FACTOR: 1.0
 
   # -- Parameters for "factor" method --
   Factor:
