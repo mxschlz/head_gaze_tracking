@@ -6,7 +6,7 @@ import pathlib
 
 # setup
 subject = "SMS019"  # subject id
-session = "B"
+session = "A"
 CONFIG_FILE = "config.yml"
 video_input = pathlib.Path(f"{get_data_path()}input/{subject}_EEG/video/trimmed/{subject}_{session}.mkv")  # if webcam==None, use this variable as video input
 webcam = None # can be 0 or None
@@ -73,9 +73,11 @@ def get_eeg_stimulus_times(header_file, marker_file, stimulus_description):
 
 
 def main():
-    # --- Part 1: Find the stimulus in the video ---
+    # This script now uses a single tracker instance for efficiency.
+    # It first runs pre-analysis passes, finds the first stimulus,
+    # then calculates all other onsets and runs the main analysis.
     try:
-        # Initialize the tracker just for finding the stimulus
+        # --- Part 1: Initialize Tracker and find first stimulus in video ---
         tracker = HeadGazeTracker(subject_id=subject, config_file_path=CONFIG_FILE, WEBCAM=webcam,
                                   VIDEO_INPUT=video_input,
                                   VIDEO_OUTPUT=video_output,
@@ -83,64 +85,39 @@ def main():
                                   starting_timestamp=None,
                                   total_frames=None)
 
-        # Use the new method to get the video frame and time of the first stimulus
+        # This method now primes the tracker by running calibration and ROI detection.
         video_stim_frame, video_stim_ms = tracker.find_first_stimulus_onset()
 
         if video_stim_frame is None:
             print("Could not find the first stimulus in the video. Check your ROI settings in config.yaml.")
             return
 
+        # --- Part 2: Get stimulus onsets (either real or synthetic) ---
+        if USE_SYNTHETIC_ONSETS:
+            print("\n--- Generating synthetic EEG trigger sequence for testing ---")
+            num_test_trials = 10
+            interval_ms = 5000  # 5 seconds
+            # Subsequent trials are at 5-second intervals from the first detected onset.
+            final_eeg_onsets_ms = [video_stim_ms + (i * interval_ms) for i in range(num_test_trials)]
+            print(f"Generated {num_test_trials} trials with onsets (ms): {final_eeg_onsets_ms}")
+        else:
+            print("\n--- Aligning timeline with real EEG data ---")
+            eeg_sampling_rate, raw_eeg_samples = get_eeg_stimulus_times(EEG_HEADER_FILE, EEG_MARKER_FILE, EEG_STIMULUS_DESCRIPTION)
+            video_stim_samples = (video_stim_ms / 1000.0) * eeg_sampling_rate
+            sample_offset = raw_eeg_samples[0] - video_stim_samples
+            adjusted_eeg_samples = [s - sample_offset for s in raw_eeg_samples]
+            final_eeg_onsets_ms = [int((s / eeg_sampling_rate) * 1000) for s in adjusted_eeg_samples]
+            print(f"Calculated {len(final_eeg_onsets_ms)} real trial onsets (ms).")
+
+        # --- Part 3: Run the full analysis using the primed tracker ---
+        print("\n--- Starting Full Analysis Pass (reusing primed tracker) ---")
+        # Pass the final, aligned onsets to the SAME tracker instance
+        tracker.eeg_trial_onsets_ms = final_eeg_onsets_ms
+        # Now, run the main analysis loop. It will skip the setup passes it already completed.
+        tracker.run()
+
     except Exception as e:
-        print(f"An error occurred during video analysis: {e}")
-        return
-
-    # --- Part 2: Find the stimulus in the EEG log ---
-    try:
-        # Get the raw, unmodified sample numbers from the .vmrk file
-        eeg_sampling_rate, raw_eeg_samples = get_eeg_stimulus_times(EEG_HEADER_FILE, EEG_MARKER_FILE, EEG_STIMULUS_DESCRIPTION)
-    except Exception as e:
-        print(f"An error occurred reading the EEG log: {e}")
-        return
-
-    # --- Part 3: Align Timelines and Convert to Milliseconds ---
-    # 1. Convert the video's first stimulus time from ms to EEG samples
-    video_stim_samples = (video_stim_ms / 1000.0) * eeg_sampling_rate
-
-    # 2. Calculate the offset: the difference in samples between the video's start and the EEG's start
-    #    offset = (EEG time of stim1) - (Video time of stim1)
-    sample_offset = raw_eeg_samples[0] - video_stim_samples
-
-    # 3. Adjust all EEG sample points to be relative to the video's start time
-    adjusted_eeg_samples = [s - sample_offset for s in raw_eeg_samples]
-
-    # 4. Convert the final, adjusted sample points to milliseconds for the tracker
-    final_eeg_onsets_ms = [int((s / eeg_sampling_rate) * 1000) for s in adjusted_eeg_samples]
-
-    if USE_SYNTHETIC_ONSETS:
-        num_test_trials = 10
-        interval_ms = 5000  # 5 seconds
-
-        # The first trial is at the time we found it in the video.
-        # Subsequent trials are at 5-second intervals from that point.
-        final_eeg_onsets_ms = [video_stim_ms + (i * interval_ms) for i in range(num_test_trials)]
-
-    # --- Part 4: Run the full analysis ---
-    print("\n--- Starting Full Analysis Pass ---")
-    try:
-        # Note: Re-initializing the tracker ensures it starts from the beginning of the video file
-        full_analysis_tracker = HeadGazeTracker(
-            subject_id=subject,
-            config_file_path=CONFIG_FILE,
-            VIDEO_INPUT=video_input,
-            VIDEO_OUTPUT=video_output,
-            TRACKING_DATA_LOG_FOLDER=tracking_data_log_folder,
-            starting_timestamp=None,  # We don't need absolute timestamps for this relative analysis
-            eeg_trial_onsets_ms=final_eeg_onsets_ms, # Pass the final, aligned onsets in ms
-	        WEBCAM=None
-        )
-        full_analysis_tracker.run()
-    except Exception as e:
-        print(f"An error occurred during the full analysis run: {e}")
+        print(f"An error occurred during the analysis process: {e}")
 
 
 if __name__ == "__main__":
