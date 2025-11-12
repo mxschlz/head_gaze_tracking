@@ -7,6 +7,7 @@ import datetime as dt
 import os
 from AngleBuffer import AngleBuffer
 import cv2 as cv
+import re
 import mediapipe as mp
 import yaml
 from sklearn.cluster import DBSCAN # Add this import at the top of the file
@@ -292,6 +293,119 @@ class HeadGazeTracker(object):
 		except (yaml.YAMLError, ValueError) as e:
 			print(f"Error parsing YAML configuration file: {e}")
 			raise
+
+	@staticmethod
+	def get_eeg_stimulus_times(header_file, marker_file, stimulus_description, events_of_interest=None):
+		"""
+		Parses BrainVision header and marker files to find the absolute timestamp
+		of the first stimulus event and all raw stimulus sample points.
+
+		Args:
+			header_file (str or pathlib.Path): Path to the .vhdr file.
+			marker_file (str or pathlib.Path): Path to the .vmrk file.
+			stimulus_description (str): The description of the stimulus marker (e.g., "Stimulus").
+			events_of_interest (list of str, optional): A list of specific marker descriptions
+				(e.g., ["S  1", "S  2"]) to extract. If None, all markers matching
+				`stimulus_description` are returned. Defaults to None.
+
+		Returns:
+			tuple: (sampling_rate_hz, all_stim_samples)
+				   - The EEG sampling rate in Hz.
+				   - A list of raw, unmodified integer sample points for ALL stimuli.
+		"""
+		# --- 1. Read Sampling Rate from Header File (.vhdr) ---
+		sampling_interval_us = None
+		# Use 'utf-8-sig' to handle potential Byte Order Mark (BOM) at the start of the file
+		with open(header_file, 'r', encoding='utf-8-sig') as f:
+			for line in f:
+				# Use a more specific regex to match ONLY the SamplingInterval line
+				match = re.search(r'^SamplingInterval=(\d+)', line.strip())
+				if match:
+					sampling_interval_us = float(match.group(1))
+					break
+		if sampling_interval_us is None:
+			raise ValueError("Could not find 'SamplingInterval' in the header file.")
+		sampling_rate_hz = 1_000_000.0 / sampling_interval_us
+		if events_of_interest:
+			print(f"Searching for specific EEG events: {events_of_interest}")
+		print(f"Found EEG Sampling Rate: {sampling_rate_hz:.2f} Hz...")
+
+		# --- 2. Read Raw Marker Samples from .vmrk File ---
+		all_stim_samples = []
+
+		# (!!!) FIX: Normalize the events_of_interest list by removing all spaces.
+		# This makes matching robust against formatting like "S  1", "S 1", or "S1".
+		normalized_events_of_interest = {e.replace(" ", "") for e in events_of_interest} if events_of_interest else None
+
+		with open(marker_file, 'r', encoding='utf-8-sig') as f:
+			for line in f:
+				# (!!!) FIX: Use a more robust regular expression to find stimulus lines.
+				# This correctly handles variations like "Stimulus,S 22" and "Stimulus, S 22".
+				# It looks for a line starting with 'Mk' followed by the description and a comma.
+				if line.startswith('Mk') and re.search(f"={stimulus_description},", line):
+					parts = line.strip().split(',') # e.g., ['Mk4=Stimulus', 'S 22', '7115', '1', '0']
+					if len(parts) < 3: continue # Skip malformed lines
+
+					# Normalize the marker from the file by removing all spaces.
+					marker_content_normalized = parts[1].replace(" ", "")
+
+					# If a filter list is provided, check if this marker is in it.
+					# Otherwise, accept all markers of the specified type.
+					if not normalized_events_of_interest or marker_content_normalized in normalized_events_of_interest:
+						stim_sample = int(parts[2])
+						all_stim_samples.append(stim_sample)
+
+		if not all_stim_samples:
+			error_msg = f"Could not find any '{stimulus_description}' markers"
+			if events_of_interest:
+				error_msg += f" matching the specified events_of_interest"
+			raise ValueError(f"{error_msg} in the EEG log file.")
+
+		print(f"Found {len(all_stim_samples)} stimulus markers. First is at sample: {all_stim_samples[0]}")
+		return sampling_rate_hz, all_stim_samples
+
+	def sync_with_eeg_and_set_onsets(self, header_file, marker_file, stimulus_description, events_of_interest=None):
+		"""
+		Orchestrates the synchronization between video and EEG data to determine
+		the precise, video-aligned timestamps for trial onsets.
+
+		This method performs several steps:
+		1. A fast pass over the video to find the first visual stimulus onset.
+		2. Parses the EEG files to get the raw stimulus marker samples.
+		3. Calculates the time offset between the video and EEG recordings.
+		4. Adjusts all EEG marker times using this offset.
+		5. Stores the final, synchronized trial onsets (in milliseconds) in the
+		   `eeg_trial_onsets_ms` attribute, ready for the main `run()` method.
+
+		Args:
+			header_file (str or pathlib.Path): Path to the EEG .vhdr file.
+			marker_file (str or pathlib.Path): Path to the EEG .vmrk file.
+			stimulus_description (str): The description of the stimulus marker in the EEG file.
+			events_of_interest (list of str, optional): A specific list of marker
+				descriptions to use for trial onsets. If None, all stimuli are used.
+				Defaults to None.
+
+		Raises:
+			RuntimeError: If the first stimulus cannot be found in the video.
+		"""
+		if self.PRINT_DATA:
+			print("--- Starting EEG Synchronization Process ---")
+
+		# 1. Find the first stimulus onset time in the video
+		_, video_stim_ms = self.find_first_stimulus_onset()
+		if video_stim_ms is None:
+			raise RuntimeError("Could not find the first stimulus in the video. Check ROI settings in config.")
+
+		# 2. Get EEG data and calculate the offset
+		eeg_sampling_rate, raw_eeg_samples = self.get_eeg_stimulus_times(
+			header_file, marker_file, stimulus_description, events_of_interest)
+		video_stim_samples = (video_stim_ms / 1000.0) * eeg_sampling_rate
+		sample_offset = raw_eeg_samples[0] - video_stim_samples
+		adjusted_eeg_samples = [s - sample_offset for s in raw_eeg_samples]
+		final_eeg_onsets_ms = [int((s / eeg_sampling_rate) * 1000) for s in adjusted_eeg_samples]
+
+		# 3. Set the calculated onsets on the instance
+		self.eeg_trial_onsets_ms = final_eeg_onsets_ms
 
 	@staticmethod
 	def vector_position(point1, point2):
