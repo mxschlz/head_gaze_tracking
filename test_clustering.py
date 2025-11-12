@@ -54,8 +54,8 @@ def visualize_clustering_results(pose_data, labels, calculated_baseline):
                c='blue', alpha=0.1, label=f'Main Cluster (n={np.sum(core_samples_mask)})')
 
     # Plot the noise points
-    ax.scatter(pose_data[noise_mask, 1], pose_data[noise_mask, 0], pose_data[noise_mask, 2],
-               c='grey', alpha=0.1, s=5, label=f'Noise (n={np.sum(noise_mask)})')
+    #ax.scatter(pose_data[noise_mask, 1], pose_data[noise_mask, 0], pose_data[noise_mask, 2],
+               #c='grey', alpha=0.1, s=5, label=f'Noise (n={np.sum(noise_mask)})')
 
     # Plot the baseline calculated by our algorithm
     ax.scatter(calculated_baseline[1], calculated_baseline[0], calculated_baseline[2],
@@ -75,7 +75,7 @@ def main():
     # --- 1. Configuration ---
     # EDIT THE VARIABLES BELOW TO POINT TO YOUR VIDEO AND CONFIG
     # --------------------------------------------------------------------
-    VIDEO_INPUT_PATH = f"{get_data_path()}input\\SMS019_EEG\\video\\SMS019_A.mkv"
+    VIDEO_INPUT_PATH = f"{get_data_path()}input\\SMS019_EEG\\video\\trimmed\\SMS019_A.mkv"
     CONFIG_FILE_PATH = "config.yml"
     # --------------------------------------------------------------------
 
