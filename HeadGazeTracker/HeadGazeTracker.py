@@ -1,6 +1,7 @@
 import numpy as np
 import socket
 import time
+import logging
 import csv
 from datetime import datetime
 import datetime as dt
@@ -23,17 +24,22 @@ drawing_spec = mp_drawing.DrawingSpec(thickness=1, circle_radius=0)
 class HeadGazeTracker(object):
 	def __init__(self, subject_id=None, config_file_path="config.yaml", VIDEO_INPUT=None, VIDEO_OUTPUT=None, WEBCAM=0,
 	             TRACKING_DATA_LOG_FOLDER=None, starting_timestamp=None, total_frames=None,
-	             eeg_trial_onsets_ms=None):
-		# 1. Load all parameters from the YAML file into class attributes
-		self.load_config(file_path=config_file_path)
+	             eeg_trial_onsets_ms=None, session=None):
 
 		# 2. Set up core attributes from arguments
 		self.subject_id = subject_id
+		self.session = session
 		self.VIDEO_INPUT = VIDEO_INPUT
 		self.VIDEO_OUTPUT_BASE = VIDEO_OUTPUT
 		self.TRACKING_DATA_LOG_FOLDER = TRACKING_DATA_LOG_FOLDER
 		self.WEBCAM = WEBCAM
 		self.total_frames = total_frames or 0
+
+		# 1. Load all parameters from the YAML file into class attributes
+		self.load_config(file_path=config_file_path)
+
+		# Setup logging before any print statements
+		self._setup_logging()
 
 		# 3. Set default values for any attributes that might be missing from the config
 		# This makes the class more robust.
@@ -85,7 +91,7 @@ class HeadGazeTracker(object):
 		self.cap = self.init_video_input()
 		self.FPS = self.cap.get(cv.CAP_PROP_FPS)
 		if self.FPS == 0:
-			print("Warning: Video FPS reported as 0. Defaulting to 30 FPS for calculations.")
+			self.logger.warning("Video FPS reported as 0. Defaulting to 30 FPS for calculations.")
 			self.FPS = 30.0
 		self.face_mesh = self.init_face_mesh()
 		self.socket = self.init_socket()
@@ -157,8 +163,39 @@ class HeadGazeTracker(object):
 		if self._eeg_trial_onsets_ms:
 			self.next_eeg_trial_index = 0 # Reset the index whenever new onsets are provided
 			if self.PRINT_DATA:
-				print(f"Set {len(self._eeg_trial_onsets_ms)} trial onsets from EEG data. Video trial detection will be bypassed.")
+				self.logger.info(f"Set {len(self._eeg_trial_onsets_ms)} trial onsets from EEG data. Video trial detection will be bypassed.")
 
+	def _setup_logging(self):
+		"""Configures the logger for the tracker."""
+		# Use a unique name for the logger to avoid conflicts.
+		logger_name = f"HeadGazeTracker_{self.subject_id or 'default'}_{id(self)}"
+		self.logger = logging.getLogger(logger_name)
+		self.logger.setLevel(logging.INFO)  # Set the lowest level to capture all messages.
+
+		# Prevent adding multiple handlers if the method is called again.
+		if self.logger.hasHandlers():
+			self.logger.handlers.clear()
+
+		# --- File Handler ---
+		log_folder = self.TRACKING_DATA_LOG_FOLDER or "."
+		os.makedirs(log_folder, exist_ok=True)
+
+		ts_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+		subj = self.subject_id or 'NA'
+		log_filename = os.path.join(log_folder, f"{subj}_{self.session}_head_gaze_tracker_{ts_str}.log")
+
+		file_handler = logging.FileHandler(log_filename)
+		file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+		file_handler.setFormatter(file_formatter)
+		self.logger.addHandler(file_handler)
+
+		# --- Console Handler ---
+		# Use the PRINT_DATA flag to control console output.
+		if getattr(self, 'PRINT_DATA', True):
+			console_handler = logging.StreamHandler()
+			console_handler.setFormatter(logging.Formatter('%(message)s'))  # Simple format for console
+			self.logger.addHandler(console_handler)
+	
 	def _reset_per_frame_state(self):
 		"""Resets variables that store state for the current frame."""
 		self.adj_pitch, self.adj_yaw, self.adj_roll = 0.0, 0.0, 0.0
@@ -210,8 +247,8 @@ class HeadGazeTracker(object):
 		# --- 1. Validate Trial Onset Detection ---
 		if not hasattr(self, 'ROI_BRIGHTNESS_THRESHOLD_FACTOR') and \
 		   not hasattr(self, 'ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD'):
-			print("WARNING: Neither 'ROI_BRIGHTNESS_THRESHOLD_FACTOR' nor 'ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD' is set.")
-			print("Trial detection via screen brightness might not work.")
+			self.logger.warning("Neither 'ROI_BRIGHTNESS_THRESHOLD_FACTOR' nor 'ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD' is set.")
+			self.logger.warning("Trial detection via screen brightness might not work.")
 			# Set a high default to prevent accidental triggering.
 			self.ROI_ABSOLUTE_BRIGHTNESS_THRESHOLD = 255
 
@@ -257,10 +294,10 @@ class HeadGazeTracker(object):
 
 		# --- 3. Validate Gaze Refinements (Non-critical, provide warnings) ---
 		if not hasattr(self, 'DOWNWARD_LOOK_LEFT_IRIS_DY_MIN'):
-			print("Warning: 'DOWNWARD_LOOK_LEFT_IRIS_DY_MIN' not in config. Defaulting to 999 (disabled).")
+			self.logger.warning("'DOWNWARD_LOOK_LEFT_IRIS_DY_MIN' not in config. Defaulting to 999 (disabled).")
 			self.DOWNWARD_LOOK_LEFT_IRIS_DY_MIN = 999
 		if not hasattr(self, 'DOWNWARD_LOOK_RIGHT_IRIS_DY_MIN'):
-			print("Warning: 'DOWNWARD_LOOK_RIGHT_IRIS_DY_MIN' not in config. Defaulting to 999 (disabled).")
+			self.logger.warning("'DOWNWARD_LOOK_RIGHT_IRIS_DY_MIN' not in config. Defaulting to 999 (disabled).")
 			self.DOWNWARD_LOOK_RIGHT_IRIS_DY_MIN = 999
 
 	def load_config(self, file_path):
@@ -288,10 +325,10 @@ class HeadGazeTracker(object):
 					setattr(self, section, params)
 
 		except FileNotFoundError:
-			print(f"Error: Configuration file not found at '{file_path}'")
+			self.logger.error(f"Configuration file not found at '{file_path}'")
 			raise
 		except (yaml.YAMLError, ValueError) as e:
-			print(f"Error parsing YAML configuration file: {e}")
+			self.logger.error(f"Error parsing YAML configuration file: {e}")
 			raise
 
 	@staticmethod
@@ -327,8 +364,8 @@ class HeadGazeTracker(object):
 			raise ValueError("Could not find 'SamplingInterval' in the header file.")
 		sampling_rate_hz = 1_000_000.0 / sampling_interval_us
 		if events_of_interest:
-			print(f"Searching for specific EEG events: {events_of_interest}")
-		print(f"Found EEG Sampling Rate: {sampling_rate_hz:.2f} Hz...")
+			logging.info(f"Searching for specific EEG events: {events_of_interest}")
+		logging.info(f"Found EEG Sampling Rate: {sampling_rate_hz:.2f} Hz...")
 
 		# --- 2. Read Raw Marker Samples from .vmrk File ---
 		all_stim_samples = []
@@ -361,7 +398,7 @@ class HeadGazeTracker(object):
 				error_msg += f" matching the specified events_of_interest"
 			raise ValueError(f"{error_msg} in the EEG log file.")
 
-		print(f"Found {len(all_stim_samples)} stimulus markers. First is at sample: {all_stim_samples[0]}")
+		logging.info(f"Found {len(all_stim_samples)} stimulus markers. First is at sample: {all_stim_samples[0]}")
 		return sampling_rate_hz, all_stim_samples
 
 	def sync_with_eeg_and_set_onsets(self, header_file, marker_file, stimulus_description, events_of_interest=None):
@@ -389,7 +426,7 @@ class HeadGazeTracker(object):
 			RuntimeError: If the first stimulus cannot be found in the video.
 		"""
 		if self.PRINT_DATA:
-			print("--- Starting EEG Synchronization Process ---")
+			self.logger.info("--- Starting EEG Synchronization Process ---")
 
 		# 1. Find the first stimulus onset time in the video
 		_, video_stim_ms = self.find_first_stimulus_onset()
@@ -466,8 +503,8 @@ class HeadGazeTracker(object):
 
 	def init_face_mesh(self):
 		if self.PRINT_DATA:
-			print("Initializing the face mesh and camera...")
-			print(f"Head pose estimation is {'enabled' if self.ENABLE_HEAD_POSE else 'disabled'}.")
+			self.logger.info("Initializing the face mesh and camera...")
+			self.logger.info(f"Head pose estimation is {'enabled' if self.ENABLE_HEAD_POSE else 'disabled'}.")
 		return mp.solutions.face_mesh.FaceMesh(
 			max_num_faces=self.MAX_NUM_FACES, refine_landmarks=self.USE_ATTENTION_MESH,
 			min_detection_confidence=self.MIN_DETECTION_CONFIDENCE,
@@ -515,15 +552,15 @@ class HeadGazeTracker(object):
 
 		fourcc_str = getattr(self, 'OUTPUT_VIDEO_FOURCC', 'XVID').upper()
 		if len(fourcc_str) != 4:
-			print(f"Warning: OUTPUT_VIDEO_FOURCC '{fourcc_str}' invalid. Defaulting to 'XVID'.")
+			self.logger.warning(f"OUTPUT_VIDEO_FOURCC '{fourcc_str}' invalid. Defaulting to 'XVID'.")
 			fourcc_str = 'XVID'
 		fourcc = cv.VideoWriter_fourcc(*fourcc_str)
 
-		if self.PRINT_DATA: print(
+		if self.PRINT_DATA: self.logger.info(
 			f"Initializing video output: {final_video_output_path} with FOURCC: {fourcc_str}, FPS: {output_fps:.2f}")
 		writer = cv.VideoWriter(final_video_output_path, fourcc, output_fps, (frame_width, frame_height))
 		if not writer.isOpened():
-			print(f"Error: Could not open video writer for {final_video_output_path} with FOURCC {fourcc_str}.")
+			self.logger.error(f"Could not open video writer for {final_video_output_path} with FOURCC {fourcc_str}.")
 			return None
 		return writer
 
@@ -538,7 +575,7 @@ class HeadGazeTracker(object):
 		Returns True on success, False on failure.
 		"""
 		if not self.cap or not self.cap.isOpened():
-			print("Error: Video capture not open for dynamic ROI detection.")
+			self.logger.error("Video capture not open for dynamic ROI detection.")
 			return False
 
 		# --- 1. Get parameters from config ---
@@ -548,8 +585,8 @@ class HeadGazeTracker(object):
 		frame_limit = int(search_duration_sec * self.FPS)
 
 		if self.PRINT_DATA:
-			print(f"Dynamic ROI search will start at {search_start_sec}s and run for {search_duration_sec}s.")
-			print(f"Using a {grid_cols}x{grid_rows} grid.")
+			self.logger.info(f"Dynamic ROI search will start at {search_start_sec}s and run for {search_duration_sec}s.")
+			self.logger.info(f"Using a {grid_cols}x{grid_rows} grid.")
 
 		# --- 2. Seek to the start of the search interval ---
 		if search_start_sec > 0:
@@ -557,7 +594,7 @@ class HeadGazeTracker(object):
 			self.cap.set(cv.CAP_PROP_POS_MSEC, start_time_ms)
 			if self.PRINT_DATA:
 				current_pos_ms = self.cap.get(cv.CAP_PROP_POS_MSEC)
-				print(f"Seeking video to {start_time_ms}ms... Current position is now ~{current_pos_ms:.0f}ms.")
+				self.logger.info(f"Seeking video to {start_time_ms}ms... Current position is now ~{current_pos_ms:.0f}ms.")
 
 		# --- 3. Collect brightness data ---
 		cell_brightness_history = np.zeros((grid_rows, grid_cols, frame_limit), dtype=np.float32)
@@ -566,7 +603,7 @@ class HeadGazeTracker(object):
 		while self.cap.isOpened() and frame_num < frame_limit:
 			frame, img_h, img_w, ret = self._get_and_preprocess_frame()
 			if not ret:
-				if self.PRINT_DATA: print("Video ended before ROI search period finished.")
+				if self.PRINT_DATA: self.logger.info("Video ended before ROI search period finished.")
 				break
 			last_frame_for_viz = frame.copy()
 			search_area_coords = getattr(self, "SEARCH_AREA", [0, 0, img_w, img_h])
@@ -584,17 +621,17 @@ class HeadGazeTracker(object):
 						cell_brightness_history[r, c, frame_num] = np.mean(cell)
 			frame_num += 1
 			if self.PRINT_DATA and frame_num % int(self.FPS or 30) == 0:
-				print(f"  ROI Search Pass: Processed {frame_num}/{frame_limit} frames...")
+				self.logger.info(f"  ROI Search Pass: Processed {frame_num}/{frame_limit} frames...")
 
 		# --- 4. Analyze the collected data ---
 		if frame_num == 0:
-			print("Error: No frames processed for ROI detection. The search start time may be past the end of the video.")
+			self.logger.error("No frames processed for ROI detection. The search start time may be past the end of the video.")
 			return False
 		cell_brightness_history = cell_brightness_history[:, :, :frame_num]
 		stds = np.std(cell_brightness_history, axis=2)
 		max_std = np.max(stds)
 		if max_std < 2.0:
-			print("Warning: Dynamic ROI detection found very low activity in the search interval.")
+			self.logger.warning("Dynamic ROI detection found very low activity in the search interval.")
 			self.cap.release()
 			self.cap = self.init_video_input()
 			return True
@@ -627,12 +664,12 @@ class HeadGazeTracker(object):
 					cv.drawContours(clean_activity_map, [largest_contour], -1, 1, -1)
 					activity_map = clean_activity_map
 					if self.PRINT_DATA:
-						print(f"Isolated largest activity blob, removing {len(contours) - 1} smaller outlier(s).")
+						self.logger.info(f"Isolated largest activity blob, removing {len(contours) - 1} smaller outlier(s).")
 
 		# --- 7. Calculate bounding box from the cleaned map ---
 		active_cells_indices = np.argwhere(activity_map > 0)
 		if active_cells_indices.size == 0:
-			print("Warning: No cells remained after cleaning. Falling back to the single most active cell.")
+			self.logger.warning("No cells remained after cleaning. Falling back to the single most active cell.")
 			active_cells_indices = np.array([np.unravel_index(np.argmax(stds), stds.shape)])
 
 		min_row, max_row = np.min(active_cells_indices[:, 0]), np.max(active_cells_indices[:, 0])
@@ -668,7 +705,7 @@ class HeadGazeTracker(object):
 				if roi_y + roi_h > img_h_total: roi_h = img_h_total - roi_y
 				if self.PRINT_DATA:
 					action = "expanded" if padding_percent > 0 else "shrunk"
-					print(f"Applied {padding_percent}% padding. ROI {action}.")
+					self.logger.info(f"Applied {padding_percent}% padding. ROI {action}.")
 
 		# --- 9. Finalize and Visualize ---
 		self.STIMULUS_ROI_COORDS = [roi_x, roi_y, roi_w, roi_h]
@@ -691,16 +728,16 @@ class HeadGazeTracker(object):
 			cv.rectangle(viz_img, (roi_x, roi_y), (roi_x + roi_w, roi_y + roi_h), (0, 0, 255), 3)
 			cv.putText(viz_img, "Final ROI", (roi_x + 5, roi_y + 30), cv.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 			cv.imshow("Dynamic ROI Search Visualization", viz_img)
-			print("\n--- ROI VISUALIZATION ---")
-			print("Showing visualization of the ROI search. Press any key in the window to continue...")
+			self.logger.info("\n--- ROI VISUALIZATION ---")
+			self.logger.info("Showing visualization of the ROI search. Press any key in the window to continue...")
 			cv.waitKey(0)
 			cv.destroyWindow("Dynamic ROI Search Visualization")
 
 		if self.PRINT_DATA:
-			print("-" * 30)
-			print(f"Dynamic ROI detection complete.")
-			print(f"Setting STIMULUS_ROI_COORDS to final bounding box: {self.STIMULUS_ROI_COORDS}")
-			print("-" * 30)
+			self.logger.info("-" * 30)
+			self.logger.info(f"Dynamic ROI detection complete.")
+			self.logger.info(f"Setting STIMULUS_ROI_COORDS to final bounding box: {self.STIMULUS_ROI_COORDS}")
+			self.logger.info("-" * 30)
 
 		# IMPORTANT: Reset the video capture for the next pass
 		self.cap.release()
@@ -815,7 +852,7 @@ class HeadGazeTracker(object):
 					self.head_pose_calibration_samples['yaw'].append(self.smooth_yaw)
 					self.head_pose_calibration_samples['roll'].append(self.smooth_roll)
 					if self.PRINT_DATA and self.frame_count % 15 == 0:  # Occasional print
-						print(
+						self.logger.info(
 							f"HP Calib sample: P={self.smooth_pitch:.1f} Y={self.smooth_yaw:.1f}. N={len(self.head_pose_calibration_samples['pitch'])}")
 
 				# Check if the calibration period is over
@@ -828,13 +865,13 @@ class HeadGazeTracker(object):
 						self.initial_roll = np.mean(self.head_pose_calibration_samples['roll'])
 						self.calibrated = True
 						if self.PRINT_DATA:
-							print(
+							self.logger.info(
 								f"Head pose auto-calibrated using {len(self.head_pose_calibration_samples['pitch'])} samples.")
-							print(
+							self.logger.info(
 								f"Initial Pose (Median): P={self.initial_pitch:.1f}, Y={self.initial_yaw:.1f}, R={self.initial_roll:.1f}")
 					else:
 						if self.PRINT_DATA:
-							print(
+							self.logger.warning(
 								f"Head pose auto-calibration failed: Not enough suitable samples ({len(self.head_pose_calibration_samples['pitch'])} collected). Manual calibration ('c') may be needed.")
 
 					self.auto_calibrate_pending = False  # Stop trying to auto-calibrate to prevent repeated messages
@@ -844,7 +881,7 @@ class HeadGazeTracker(object):
 			self.initial_pitch, self.initial_yaw, self.initial_roll = self.smooth_pitch, self.smooth_yaw, self.smooth_roll
 			self.calibrated = True
 			self.auto_calibrate_pending = False  # Manual calibration also means we stop pending auto-calib
-			if self.PRINT_DATA: print(
+			if self.PRINT_DATA: self.logger.info(
 				f"Head pose recalibrated by user: P={self.initial_pitch:.1f}, Y={self.initial_yaw:.1f}, R={self.initial_roll:.1f}")
 
 		# Adjust head pose angles based on the calibration baseline
@@ -859,12 +896,12 @@ class HeadGazeTracker(object):
 	def _perform_clustering_calibration(self):
 		"""Finds the baseline pose by clustering all collected samples."""
 		if not self.clustering_calib_all_samples:
-			if self.PRINT_DATA: print("Clustering calibration failed: No samples collected.")
+			if self.PRINT_DATA: self.logger.warning("Clustering calibration failed: No samples collected.")
 			return
 
 		pose_array = np.array(self.clustering_calib_all_samples)
 		if self.PRINT_DATA:
-			print(f"Performing clustering calibration on {len(pose_array)} head pose samples...")
+			self.logger.info(f"Performing clustering calibration on {len(pose_array)} head pose samples...")
 
 		# DBSCAN parameters can be loaded from config
 		eps = getattr(self, "CLUSTERING_DBSCAN_EPS", 3.0)
@@ -878,7 +915,7 @@ class HeadGazeTracker(object):
 
 		if len(counts) == 0:
 			if self.PRINT_DATA:
-				print("Clustering found no stable pose. Falling back to median of all samples.")
+				self.logger.warning("Clustering found no stable pose. Falling back to median of all samples.")
 			# Fallback: if no clusters are found, the median of all data is still a robust choice.
 			baseline_pose = np.median(pose_array, axis=0)
 		else:
@@ -887,13 +924,13 @@ class HeadGazeTracker(object):
 			largest_cluster_points = pose_array[labels == largest_cluster_label]
 			baseline_pose = np.median(largest_cluster_points, axis=0)
 			if self.PRINT_DATA:
-				print(f"Found largest cluster with {counts.max()} points (out of {len(labels)}).")
+				self.logger.info(f"Found largest cluster with {counts.max()} points (out of {len(labels)}).")
 
 		self.initial_pitch, self.initial_yaw, self.initial_roll = baseline_pose
 		self.calibrated = True
 		if self.PRINT_DATA:
-			print(f"Calibration completed via clustering.")
-			print(f"New Initial Pose: P={self.initial_pitch:.1f}, Y={self.initial_yaw:.1f}, R={self.initial_roll:.1f}")
+			self.logger.info(f"Calibration completed via clustering.")
+			self.logger.info(f"New Initial Pose: P={self.initial_pitch:.1f}, Y={self.initial_yaw:.1f}, R={self.initial_roll:.1f}")
 
 	def find_first_stimulus_onset(self):
 		"""
@@ -905,33 +942,33 @@ class HeadGazeTracker(object):
 			A tuple (None, None) if no stimulus is found or an error occurs.
 		"""
 		if not self.ENABLE_VIDEO_TRIAL_DETECTION:
-			print("Error: `ENABLE_VIDEO_TRIAL_DETECTION` must be true in config to find stimulus onset.")
+			self.logger.error("`ENABLE_VIDEO_TRIAL_DETECTION` must be true in config to find stimulus onset.")
 			return None, None
 
 		# --- NEW: Perform Clustering Calibration if configured, just like the main run() method ---
 		# This ensures that if the main analysis relies on a calibrated pose, the same
 		# calibration is available and consistent from the very beginning.
 		if self.CALIBRATION_METHOD == 'clustering':
-			print("--- Running Clustering Calibration as part of stimulus onset search ---")
+			self.logger.info("--- Running Clustering Calibration as part of stimulus onset search ---")
 			if not self._execute_calibration_pass():
-				print("Clustering calibration failed during stimulus search. Aborting.")
+				self.logger.error("Clustering calibration failed during stimulus search. Aborting.")
 				self._cleanup(finalize_data=False)
 				return None, None
 			# CRITICAL FIX: The calibration pass releases the video capture.
 			# We must re-initialize it before the next step.
-			print("Re-initializing video capture after calibration pass...")
+			self.logger.info("Re-initializing video capture after calibration pass...")
 			self.cap = self.init_video_input()
 
 		# --- NEW: Perform Dynamic ROI search if configured, just like the main run() method ---
 		# This ensures the ROI used for finding the first stimulus is the same one used for the full analysis.
 		if getattr(self, 'STIMULUS_ROI_METHOD', 'static') == 'dynamic':
-			print("--- Running Dynamic ROI Detection for stimulus onset search ---")
+			self.logger.info("--- Running Dynamic ROI Detection for stimulus onset search ---")
 			if not self._find_dynamic_roi():
-				print("Dynamic ROI detection failed during stimulus search. Aborting.")
+				self.logger.error("Dynamic ROI detection failed during stimulus search. Aborting.")
 				self._cleanup(finalize_data=False)
 				return None, None
 
-		print("--- Starting Fast Pass: Searching for first stimulus onset ---")
+		self.logger.info("--- Starting Fast Pass: Searching for first stimulus onset ---")
 		self._reset_analysis_state()  # Ensure a clean state
 
 		frame_count = -1
@@ -940,7 +977,7 @@ class HeadGazeTracker(object):
 				frame_count += 1
 				frame, img_h, img_w, ret = self._get_and_preprocess_frame()
 				if not ret:
-					print("Video ended before any stimulus was detected.")
+					self.logger.warning("Video ended before any stimulus was detected.")
 					return None, None
 
 				current_frame_time_ms = int(frame_count * (1000.0 / self.FPS))
@@ -957,7 +994,7 @@ class HeadGazeTracker(object):
 						self.roi_baseline_std_dev = np.std(self.roi_brightness_samples)
 						if self.roi_baseline_std_dev < 0.5: self.roi_baseline_std_dev = 0.5
 						if self.PRINT_DATA:
-							print(f"ROI Baseline Calculated: Mean={self.roi_baseline_mean:.2f}, SD={self.roi_baseline_std_dev:.2f}")
+							self.logger.info(f"ROI Baseline Calculated: Mean={self.roi_baseline_mean:.2f}, SD={self.roi_baseline_std_dev:.2f}")
 					continue # Continue to next frame while collecting baseline
 
 				# 2. Detect stimulus (copied from _update_trial_state)
@@ -986,14 +1023,14 @@ class HeadGazeTracker(object):
 
 				# 3. If detected, we're done!
 				if stimulus_detected:
-					print(f"--- First stimulus detected at frame {frame_count} ({current_frame_time_ms} ms) ---")
+					self.logger.info(f"--- First stimulus detected at frame {frame_count} ({current_frame_time_ms} ms) ---")
 					return frame_count, current_frame_time_ms
 
 		finally:
 			# --- MODIFICATION ---
 			# Instead of tearing down, reset the video to the beginning and clear
 			# only the trial state, preserving the calibration and ROI results.
-			print("First stimulus found. Resetting video to frame 0 for main analysis pass.")
+			self.logger.info("First stimulus found. Resetting video to frame 0 for main analysis pass.")
 			self._reset_for_main_pass()
 
 	def _get_face_looks_text(self):
@@ -1015,7 +1052,7 @@ class HeadGazeTracker(object):
 			gray_stimulus_roi = cv.cvtColor(stimulus_roi, cv.COLOR_BGR2GRAY)
 			return np.mean(gray_stimulus_roi)
 		if self.PRINT_DATA and self.frame_count % 100 == 0:
-			print(f"Warning: STIMULUS_ROI_COORDS {self.STIMULUS_ROI_COORDS} invalid for frame size ({img_w}x{img_h}).")
+			self.logger.warning(f"STIMULUS_ROI_COORDS {self.STIMULUS_ROI_COORDS} invalid for frame size ({img_w}x{img_h}).")
 		return 0.0
 
 	def _update_trial_state(self, current_frame_time_ms):
@@ -1039,7 +1076,7 @@ class HeadGazeTracker(object):
 					if self.roi_baseline_std_dev < 0.5:
 						self.roi_baseline_std_dev = 0.5
 					if self.PRINT_DATA:
-						print(
+						self.logger.info(
 							f"ROI Baseline Calculated: Mean={self.roi_baseline_mean:.2f}, SD={self.roi_baseline_std_dev:.2f}")
 			else:
 				# If we are in a trial before baseline is set, do nothing.
@@ -1092,14 +1129,14 @@ class HeadGazeTracker(object):
 				'active': True, 'stimulus_frames_processed_gaze': 0,
 				'frames_on_stimulus_area': 0, 'looked_final': 2}
 			if self.PRINT_DATA:
-				print(
+				self.logger.info(
 					f"Trial {self.trial_counter} START @{start_t}ms (Part {self.current_video_part}). ROI Bright: {self.current_roi_brightness:.2f}")
 
 		# If a trial is currently active, check if it should end.
 		if self.current_trial_data and self.current_trial_data['active']:
 			if current_frame_time_ms >= self.current_trial_data['trial_end_time_ms']:
 				if self.PRINT_DATA:
-					print(
+					self.logger.info(
 						f"Trial {self.current_trial_data['id']} END @{current_frame_time_ms}ms (Part {self.current_video_part}).")
 
 				# Finalize trial classification (looked vs. away)
@@ -1124,7 +1161,7 @@ class HeadGazeTracker(object):
 		if self.current_trial_data and self.current_trial_data['active']:
 			if current_frame_time_ms >= self.current_trial_data['trial_end_time_ms']:
 				if self.PRINT_DATA:
-					print(
+					self.logger.info(
 						f"Trial {self.current_trial_data['id']} END @{current_frame_time_ms}ms (Part {self.current_video_part}).")
 
 				# Finalize trial classification (looked vs. away)
@@ -1169,7 +1206,7 @@ class HeadGazeTracker(object):
 				'frames_on_stimulus_area': 0, 'looked_final': 2}
 			self.next_eeg_trial_index += 1 # Move to the next trial in the list
 			if self.PRINT_DATA:
-				print(f"EEG Trial {self.trial_counter} START @{start_t}ms (Part {self.current_video_part}).")
+				self.logger.info(f"EEG Trial {self.trial_counter} START @{start_t}ms (Part {self.current_video_part}).")
 
 	def _classify_gaze_for_current_trial(self, current_frame_time_ms):
 		"""
@@ -1318,7 +1355,7 @@ class HeadGazeTracker(object):
 			         np.array([self.l_cx, self.l_cy, int(self.l_dx), int(self.l_dy)],
 			                  dtype=np.int32).tobytes()
 			self.socket.sendto(packet, self.SERVER_ADDRESS)
-			if self.PRINT_DATA: print(f'Sent UDP packet to {self.SERVER_ADDRESS}')
+			if self.PRINT_DATA: self.logger.info(f'Sent UDP packet to {self.SERVER_ADDRESS}')
 
 	def _draw_on_screen_data(self, frame, results_face_mesh, img_h, img_w, current_frame_time_ms):
 		font_face = cv.FONT_HERSHEY_SIMPLEX
@@ -1481,21 +1518,21 @@ class HeadGazeTracker(object):
 		if self.out and self.out.isOpened():
 			self.out.write(frame)
 		elif self.out and not self.out.isOpened() and self.VIDEO_OUTPUT_BASE and self.frame_count % 100 == 0:
-			if self.PRINT_DATA: print(f"Warning: VideoWriter for current part is not open.")
+			if self.PRINT_DATA: self.logger.warning(f"VideoWriter for current part is not open.")
 
 	def _handle_key_presses(self, key_pressed):
 		if key_pressed == ord('q'):
-			if self.PRINT_DATA: print("Exiting program...")
+			if self.PRINT_DATA: self.logger.info("Exiting program...")
 			return True
 		return False
 
 	def _finalize_part(self, part_suffix=""):
 		"""Finalizes writing logs and video for the current part."""
-		if self.PRINT_DATA: print(f"Finalizing data for Part {self.current_video_part} with suffix '{part_suffix}'...")
+		if self.PRINT_DATA: self.logger.info(f"Finalizing data for Part {self.current_video_part} with suffix '{part_suffix}'...")
 		if self.out and self.out.isOpened():
 			self.out.release()
 			self.out = None  # Important to set to None
-			if self.PRINT_DATA: print(f"Released video writer for Part {self.current_video_part}.")
+			if self.PRINT_DATA: self.logger.info(f"Released video writer for Part {self.current_video_part}.")
 
 		self._save_trial_summary(part_suffix)
 		self._save_main_log(part_suffix)
@@ -1503,7 +1540,7 @@ class HeadGazeTracker(object):
 	def _prepare_for_next_part(self, split_time_ms_absolute):
 		"""Resets state for processing the next part of the video."""
 		if self.PRINT_DATA: print(
-			f"Preparing for Part {self.current_video_part + 1} starting around {split_time_ms_absolute}ms (original time)...")
+			self.logger.info(f"Preparing for Part {self.current_video_part + 1} starting around {split_time_ms_absolute}ms (original time)..."))
 		self.current_video_part += 1
 
 		# Reset data accumulators
@@ -1532,22 +1569,22 @@ class HeadGazeTracker(object):
 		if self.VIDEO_OUTPUT_BASE:
 			self.out = self.init_video_output(part_suffix=self.output_suffix_part2)
 			if self.out is None and self.PRINT_DATA:
-				print(f"Warning: Failed to initialize video output for Part {self.current_video_part}")
+				self.logger.warning(f"Failed to initialize video output for Part {self.current_video_part}")
 
 		# Calibration (self.calibrated, self.initial_pitch, etc.) persists.
 		# self.auto_calibrate_pending also persists (or could be reset if desired).
 		# self.starting_timestamp (original video start) persists for absolute frame time calculation.
 
-		if self.PRINT_DATA: print(f"State reset for Part {self.current_video_part}.")
+		if self.PRINT_DATA: self.logger.info(f"State reset for Part {self.current_video_part}.")
 
 	def _save_trial_summary(self, part_suffix=""):
 		if not (self.ENABLE_VIDEO_TRIAL_DETECTION and self.all_trials_summary):
-			if self.ENABLE_VIDEO_TRIAL_DETECTION and self.PRINT_DATA: print(
+			if self.ENABLE_VIDEO_TRIAL_DETECTION and self.PRINT_DATA: self.logger.info(
 				f"No trials to summarize for current part{part_suffix}.")
 			return
 
 		if self.current_trial_data and self.current_trial_data['active']:
-			if self.PRINT_DATA: print(
+			if self.PRINT_DATA: self.logger.info(
 				f"Finalizing active trial {self.current_trial_data['id']} on exit/split (Part {self.current_video_part}).")
 			if self.current_trial_data['stimulus_frames_processed_gaze'] > 0:
 				perc = (self.current_trial_data['frames_on_stimulus_area'] /
@@ -1562,7 +1599,7 @@ class HeadGazeTracker(object):
 		subj = self.subject_id or 'NA'
 
 		base_filename = self.OUTPUT_TRIAL_SUMMARY_FILENAME_PREFIX or "trial_summary_"
-		summary_fn = os.path.join(folder, f"{subj}_{base_filename.replace('.csv', '')}{part_suffix}_{ts_str}.csv")
+		summary_fn = os.path.join(folder, f"{subj}_{self.session}_{base_filename.replace('.csv', '')}{part_suffix}_{ts_str}.csv")
 
 		os.makedirs(os.path.dirname(summary_fn), exist_ok=True)
 
@@ -1576,20 +1613,20 @@ class HeadGazeTracker(object):
 					trial_sum['id'], trial_sum['start_time_ms'], trial_sum['stimulus_end_time_ms'],
 					trial_sum['trial_end_time_ms'], trial_sum['stimulus_frames_processed_gaze'],
 					trial_sum['frames_on_stimulus_area'], trial_sum['looked_final']])
-		if self.PRINT_DATA: print(f"Trial summary saved: {summary_fn}")
+		if self.PRINT_DATA: self.logger.info(f"Trial summary saved: {summary_fn}")
 
 	def _save_main_log(self, part_suffix=""):
 		if not (self.LOG_DATA and self.csv_data):
-			if self.LOG_DATA and self.PRINT_DATA: print(f"No main log data to write for current part{part_suffix}.")
+			if self.LOG_DATA and self.PRINT_DATA: self.logger.info(f"No main log data to write for current part{part_suffix}.")
 			return
 
-		if self.PRINT_DATA: print(f"Writing main log data for current part{part_suffix} to CSV...")
+		if self.PRINT_DATA: self.logger.info(f"Writing main log data for current part{part_suffix} to CSV...")
 		ts_str = datetime.now().strftime('%Y%m%d_%H%M%S')
 		folder = self.TRACKING_DATA_LOG_FOLDER or "."
 		subj = self.subject_id or 'NA'
 
 		base_filename = getattr(self, "OUTPUT_MAIN_LOG_FILENAME_PREFIX", "eye_tracking_log_")
-		csv_fn = os.path.join(folder, f"{subj}_{base_filename.replace('.csv', '')}{part_suffix}_{ts_str}.csv")
+		csv_fn = os.path.join(folder, f"{subj}_{self.session}_{base_filename.replace('.csv', '')}{part_suffix}_{ts_str}.csv")
 
 		os.makedirs(os.path.dirname(csv_fn), exist_ok=True)
 
@@ -1607,12 +1644,12 @@ class HeadGazeTracker(object):
 			writer = csv.writer(file)
 			writer.writerow(self.column_names)
 			writer.writerows(self.csv_data)
-		if self.PRINT_DATA: print(f"Main log data saved: {csv_fn}")
+		if self.PRINT_DATA: self.logger.info(f"Main log data saved: {csv_fn}")
 
 	def _reset_analysis_state(self):
 		"""Resets all state variables required for a fresh analysis pass."""
 		if self.PRINT_DATA:
-			print("Resetting tracker state for main analysis pass...")
+			self.logger.info("Resetting tracker state for main analysis pass...")
 
 		# Re-initialize video capture to start from the beginning
 		self.cap = self.init_video_input()
@@ -1673,17 +1710,17 @@ class HeadGazeTracker(object):
 		Returns True on success, False on failure.
 		"""
 		if not self.cap or not self.cap.isOpened():
-			print("Error: Video capture not open for calibration pass.")
+			self.logger.error("Video capture not open for calibration pass.")
 			return False
 
 		calib_duration_sec = getattr(self, "CLUSTERING_CALIB_DURATION_SECONDS", 30)
 		frame_limit = int(calib_duration_sec * self.FPS)
 
 		frame_num = 0
-		while self.cap.isOpened() and frame_num < frame_limit:
+		while self.cap.isOpened() and frame_num < frame_limit:			
 			frame, img_h, img_w, ret = self._get_and_preprocess_frame()
 			if not ret:
-				if self.PRINT_DATA: print("Video ended before calibration period finished.")
+				if self.PRINT_DATA: self.logger.info("Video ended before calibration period finished.")
 				break
 
 			# We only need to run face mesh and head pose estimation
@@ -1695,7 +1732,7 @@ class HeadGazeTracker(object):
 
 			frame_num += 1
 			if self.PRINT_DATA and frame_num % int(self.FPS or 30) == 0:
-				print(f"  Calibration Pass: Processed {frame_num}/{frame_limit} frames...")
+				self.logger.info(f"  Calibration Pass: Processed {frame_num}/{frame_limit} frames...")
 
 		# If the video was shorter than the calibration period, we might need to trigger calibration manually
 		if not self.calibrated and len(self.clustering_calib_all_samples) > 0:
@@ -1723,7 +1760,7 @@ class HeadGazeTracker(object):
 		cv.destroyAllWindows()
 		if hasattr(self, 'socket') and self.socket:
 			self.socket.close()
-		if self.PRINT_DATA: print("Program exited.")
+		if self.PRINT_DATA: self.logger.info("Program exited.")
 
 	def run(self):
 		"""
@@ -1732,29 +1769,30 @@ class HeadGazeTracker(object):
 		# --- NEW: Check if pre-analysis passes were already run (e.g., by find_first_stimulus_onset) ---
 		# If the tracker is already calibrated, we can skip the entire setup sequence.
 		if self.calibrated:
-			print("--- Tracker is already primed. Skipping setup passes and starting main analysis. ---")
+			self.logger.info("--- Tracker is already primed. Skipping setup passes and starting main analysis. ---")
 		else:
 			# --- Standard Setup Execution Path for a fresh instance ---
 			if getattr(self, 'STIMULUS_ROI_METHOD', 'static') == 'dynamic':
-				print("--- Starting Pass 1: Dynamic ROI Detection ---")
+				self.logger.info("--- Starting Pass 1: Dynamic ROI Detection ---")
 				if not self._find_dynamic_roi():
-					print("Dynamic ROI detection failed. Aborting analysis.")
+					self.logger.error("Dynamic ROI detection failed. Aborting analysis.")
 					self._cleanup(finalize_data=False)
 					return
-				print("--- Dynamic ROI Detection Complete ---")
+				self.logger.info("--- Dynamic ROI Detection Complete ---")
 
 			if self.CALIBRATION_METHOD == 'clustering':
-				print("--- Starting Pass 2: Calibration Data Collection ---")
+				self.logger.info("--- Starting Pass 2: Calibration Data Collection ---")
 				if not self._execute_calibration_pass():
-					print("Clustering calibration failed. A face may not have been consistently visible.")
-					print("Aborting analysis.")
+					self.logger.error("Clustering calibration failed. A face may not have been consistently visible.")
+					self.logger.error("Aborting analysis.")
 					self._cleanup(finalize_data=False)
 					return
-				print("--- Calibration Complete. Starting Final Pass: Full Analysis ---")
+				self.logger.info("--- Calibration Complete. Starting Final Pass: Full Analysis ---")
 				self._reset_analysis_state()  # This is the problematic call for the re-init workflow
 			else:
-				print("--- Starting Single-Pass Analysis ---")
+				self.logger.info("--- Starting Single-Pass Analysis ---")
 
+		self.logger.info("="*50)
 		# =================================================================================
 		# --- Main Analysis Loop ---
 		# =================================================================================
@@ -1770,14 +1808,14 @@ class HeadGazeTracker(object):
 
 				current_frame_time_ms = int(self.frame_count * (1000.0 / self.FPS))
 				if self.PRINT_DATA and self.frame_count % 60 == 0:
-					print(
+					self.logger.info(
 						f"Frame Nr.: {self.frame_count}, Time: {current_frame_time_ms}ms (Part {self.current_video_part})")
 
 				# --- Video Splitting Logic ---
 				if self.split_at_ms is not None and \
 						not self.split_triggered_and_finalized and \
 						current_frame_time_ms >= self.split_at_ms:
-					if self.PRINT_DATA: print(f"Split point reached at {current_frame_time_ms}ms. Finalizing Part 1.")
+					if self.PRINT_DATA: self.logger.info(f"Split point reached at {current_frame_time_ms}ms. Finalizing Part 1.")
 					self._finalize_part(part_suffix=self.output_suffix_part1)
 					self._prepare_for_next_part(current_frame_time_ms)
 					self.split_triggered_and_finalized = True
@@ -1829,7 +1867,7 @@ class HeadGazeTracker(object):
 				if self._handle_key_presses(key_pressed):
 					break
 		except Exception as e:
-			print(f"An error occurred in the main run loop: {e}")
+			self.logger.error(f"An error occurred in the main run loop: {e}", exc_info=True)
 			import traceback
 			traceback.print_exc()
 		finally:
@@ -1849,10 +1887,9 @@ if __name__ == "__main__":
 		# )
 		tracker = HeadGazeTracker(config_file_path=config_path)  # For default testing from config
 		tracker.run()
-	except IOError as e:
-		print(f"IOError during initialization or run: {e}")
 	except Exception as e:
-		print(f"Failed to initialize or run HeadGazeTracker: {e}")
+		# If the logger hasn't been set up, this will print to console.
+		logging.basicConfig()
+		logging.critical(f"Failed to initialize or run HeadGazeTracker: {e}", exc_info=True)
 		import traceback
-
 		traceback.print_exc()
