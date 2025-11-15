@@ -13,6 +13,9 @@ System:
   # If True, prints detailed status updates to the console. Essential for debugging.
   PRINT_DATA: True
 
+  # Turn tuning mode on or off
+  TUNING_MODE: False
+
   # If True, shows the video window with all on-screen data overlays.
   # Set to False for "headless" batch processing to gain a significant speed boost.
   SHOW_ON_SCREEN_DATA: True
@@ -124,7 +127,7 @@ Calibration:
   METHOD: "clustering"
 
   # Duration in seconds at the start of the video to use for automatic calibration.
-  CLUSTERING_CALIB_DURATION_SECONDS: 5
+  CLUSTERING_CALIB_DURATION_SECONDS: 30
 
   # --- Settings for "clustering" method ---
   Clustering:
@@ -160,12 +163,12 @@ Trials:
   # -- Parameters for "dynamic" ROI detection --
   DynamicROI:
     # If VISUALIZE_ROI_SEARCH is True, opens a window during the search pass to show the grid, cell activity, and the final detected ROI. Press any key to continue.
-    VISUALIZE_ROI_SEARCH: True
+    VISUALIZE_ROI_SEARCH: False
     # (NEW) The time in seconds into the video to START searching for the ROI.
     # Set this to just before you expect the first stimulus to appear.
     SEARCH_START_SECONDS: 300 # Example: Start search at 3 minutes
     # Duration (in seconds) at the start of the video to search for the active region.
-    SEARCH_DURATION_SECONDS: 5
+    SEARCH_DURATION_SECONDS: 10
     # How many rows and columns to divide the screen into for analysis.
     # More divisions are more precise but use more memory. [columns, rows]
     GRID_DIVISIONS: [30, 25]
@@ -285,8 +288,8 @@ Trials:
 
   # -- Parameters for "head_pose_only" method --
   # Defines the "on stimulus" head pose range (in degrees from calibrated neutral).
-  STIMULUS_PITCH_RANGE: [-10, 10]
-  STIMULUS_YAW_RANGE: [-10, 10]
+  STIMULUS_PITCH_RANGE: [-25, 25]
+  STIMULUS_YAW_RANGE: [-25, 25]
 
   # -- Parameters for "eye_gaze" methods --
   # Define the "on stimulus" iris position ranges (in pixels, relative to eye corner).
