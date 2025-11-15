@@ -46,6 +46,7 @@ class HeadGazeTracker(object):
 		# System & Performance
 		self.PRINT_DATA = getattr(self, "PRINT_DATA", True)
 		self.SHOW_ON_SCREEN_DATA = getattr(self, "SHOW_ON_SCREEN_DATA", True)
+		self.TUNING_MODE = getattr(self, "TUNING_MODE", False)
 		self.FRAME_SKIP = getattr(self, "FRAME_SKIP", 1)
 		self.USE_SOCKET = getattr(self, "USE_SOCKET", False)
 		self.SERVER_IP = getattr(self, "SERVER_IP", "127.0.0.1")
@@ -1494,6 +1495,19 @@ class HeadGazeTracker(object):
 			cv.putText(frame, self.gaze_on_stimulus_display_text, (img_w // 2 - w // 2, 20), font_face, font_scale_main,
 			           color, font_thickness)
 
+		# --- NEW: Tuning Mode Display ---
+		if self.TUNING_MODE and self.calibrated:
+			tuning_font_scale = 1.0
+			tuning_font_thickness = 2
+			pitch_text = f"Pitch: {self.adj_pitch:.1f}"
+			yaw_text = f"Yaw:   {self.adj_yaw:.1f}"
+			(w_p, h_p), _ = cv.getTextSize(pitch_text, font_face, tuning_font_scale, tuning_font_thickness)
+			(w_y, h_y), _ = cv.getTextSize(yaw_text, font_face, tuning_font_scale, tuning_font_thickness)
+			center_x = img_w // 2
+			cv.putText(frame, pitch_text, (center_x - w_p // 2, img_h // 2 - h_p), font_face, tuning_font_scale, text_color_yellow, tuning_font_thickness)
+			cv.putText(frame, yaw_text, (center_x - w_y // 2, img_h // 2 + h_y), font_face, tuning_font_scale, text_color_yellow, tuning_font_thickness)
+		# --- End Tuning Mode Display ---
+
 		cv.putText(frame, f'FPS: {self.FPS:.1f}', (tl_x, img_h - 10), font_face, font_scale_main, text_color_green,
 		           font_thickness)
 
@@ -1839,7 +1853,7 @@ class HeadGazeTracker(object):
 						self.face_looks_display_text = self._get_face_looks_text()
 
 				if self.ENABLE_VIDEO_TRIAL_DETECTION:
-					# If EEG onsets are provided, use them. Otherwise, fall back to video detection.
+					# If EEG onsets are provided, use them. Otherwise, fall back to video detection. (Bypassed in tuning mode)
 					if self.eeg_trial_onsets_ms:
 						self._check_for_eeg_trial_onset(current_frame_time_ms)
 					else:
@@ -1850,10 +1864,11 @@ class HeadGazeTracker(object):
 					# End the trial if its time is up. This MUST run for both EEG and video trials.
 					self._end_active_trial_if_needed(current_frame_time_ms)
 
-					# If a trial is currently active (either just started or ongoing), classify gaze.
-					if self.current_trial_data and self.current_trial_data['active'] and \
-							results_face_mesh and results_face_mesh.multi_face_landmarks:
-						self._classify_gaze_for_current_trial(current_frame_time_ms)
+					# If a trial is active and we are NOT in tuning mode, classify gaze.
+					if not self.TUNING_MODE:
+						if self.current_trial_data and self.current_trial_data['active'] and \
+								results_face_mesh and results_face_mesh.multi_face_landmarks:
+							self._classify_gaze_for_current_trial(current_frame_time_ms)
 
 				if self.LOG_DATA:
 					self._log_frame_data(current_frame_time_ms, self.frame_count, results_face_mesh, img_w, img_h)
