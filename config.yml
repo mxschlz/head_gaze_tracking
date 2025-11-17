@@ -288,8 +288,8 @@ Trials:
 
   # -- Parameters for "head_pose_only" method --
   # Defines the "on stimulus" head pose range (in degrees from calibrated neutral).
-  STIMULUS_PITCH_RANGE: [-25, 25]
-  STIMULUS_YAW_RANGE: [-25, 25]
+  STIMULUS_PITCH_RANGE: [-20, 20]
+  STIMULUS_YAW_RANGE: [-20, 20]
 
   # -- Parameters for "eye_gaze" methods --
   # Define the "on stimulus" iris position ranges (in pixels, relative to eye corner).
