@@ -4,12 +4,12 @@ import pathlib
 
 
 # setup
-subject = "SMS059"  # subject id
-session = "B"
+subject = "SMS057"  # subject id
+session = "A"
 CONFIG_FILE = "config.yml"
 
 # --- Video Input (using glob for flexibility) ---
-video_dir = pathlib.Path(f"{get_data_path()}input/{subject}/video/trimmed/")
+video_dir = pathlib.Path(f"{get_data_path()}test_run/")
 video_pattern = f"{subject}_{session}*.mkv"
 found_videos = list(video_dir.glob(video_pattern))
 
@@ -46,12 +46,14 @@ EEG_STIMULUS_DESCRIPTION = "Stimulus"
 EEG_EVENTS_OF_INTEREST = ["S 21", "S 22", "S 23", "S 24"]
 
 if __name__ == "__main__":
-	tracker = HeadGazeTracker(subject_id=subject, config_file_path=CONFIG_FILE, WEBCAM=webcam,
-                              VIDEO_INPUT=video_input, VIDEO_OUTPUT=video_output,
+    # To test performance without video writing, set VIDEO_OUTPUT to None.
+    # This will prevent the tracker from creating and writing to a video file.
+    tracker = HeadGazeTracker(subject_id=subject, config_file_path=CONFIG_FILE, WEBCAM=webcam,
+                              VIDEO_INPUT=video_input, VIDEO_OUTPUT=None,
                               TRACKING_DATA_LOG_FOLDER=tracking_data_log_folder, session=session)
 
-	tracker.sync_with_eeg_and_set_onsets(header_file=EEG_HEADER_FILE, marker_file=EEG_MARKER_FILE,
+    tracker.sync_with_eeg_and_set_onsets(header_file=EEG_HEADER_FILE, marker_file=EEG_MARKER_FILE,
                                          stimulus_description=EEG_STIMULUS_DESCRIPTION,
                                          events_of_interest=EEG_EVENTS_OF_INTEREST)
 
-	tracker.run()
+    tracker.run()
