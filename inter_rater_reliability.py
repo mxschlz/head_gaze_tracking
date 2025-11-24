@@ -45,6 +45,22 @@ def calculate_cohens_kappa(file_path1, file_path2, column_index1=0, column_index
 
         rater1_data, rater2_data = rater_data_list[0], rater_data_list[1]
 
+        # --- New: Harmonize different coding schemes for 'False' (0 vs 2) ---
+        # Check if one rater uses {1, 0} and the other uses {1, 2} for (True, False)
+        unique_vals1 = set(rater1_data.unique())
+        unique_vals2 = set(rater2_data.unique())
+
+        # Define the expected coding schemes
+        scheme_a = {1, 2}
+        scheme_b = {1, 0}
+
+        if (unique_vals1.issubset(scheme_a) and unique_vals2.issubset(scheme_b)):
+            print("  - Info: Harmonizing coding schemes. Converting 0s to 2s for rater 2.")
+            rater2_data = rater2_data.replace(0, 2)
+        elif (unique_vals2.issubset(scheme_a) and unique_vals1.issubset(scheme_b)):
+            print("  - Info: Harmonizing coding schemes. Converting 0s to 2s for rater 1.")
+            rater1_data = rater1_data.replace(0, 2)
+
         if len(rater1_data) != len(rater2_data):
             # Try to align by trimming the longer one, which can happen if one file has an extra empty row etc.
             min_len = min(len(rater1_data), len(rater2_data))
