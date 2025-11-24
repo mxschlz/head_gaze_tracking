@@ -442,8 +442,24 @@ class HeadGazeTracker(object):
 		adjusted_eeg_samples = [s - sample_offset for s in raw_eeg_samples]
 		final_eeg_onsets_ms = [int((s / eeg_sampling_rate) * 1000) for s in adjusted_eeg_samples]
 
-		# 3. Set the calculated onsets on the instance
+		# 3. Set the calculated onsets on the instance and save sync info
 		self.eeg_trial_onsets_ms = final_eeg_onsets_ms
+
+		# --- NEW: Save synchronization info to a file for external analysis ---
+		sync_info = {
+			'eeg_sampling_rate': eeg_sampling_rate,
+			'sample_offset': sample_offset,
+			'video_stim_ms': video_stim_ms,
+			'first_eeg_stim_sample_raw': raw_eeg_samples[0]
+		}
+		folder = self.TRACKING_DATA_LOG_FOLDER or "."
+		subj = self.subject_id or 'NA'
+		sync_info_filename = os.path.join(folder, f"{subj}_{self.session}_eeg_sync_info.json")
+		os.makedirs(os.path.dirname(sync_info_filename), exist_ok=True)
+		import json
+		with open(sync_info_filename, 'w') as f:
+			json.dump(sync_info, f, indent=4)
+		self.logger.info(f"Saved EEG synchronization info to {sync_info_filename}")
 
 	@staticmethod
 	def vector_position(point1, point2):
@@ -460,21 +476,29 @@ class HeadGazeTracker(object):
 
 	def estimate_head_pose(self, landmarks, image_size):
 		scale_factor = self.USER_FACE_WIDTH / 150.0
+		# This 3D model is a generic representation of a human head.
+		# The points correspond to the landmark indices defined in `_indices_pose`.
 		model_points = np.array([
-			(0.0, 0.0, 0.0), (0.0, -330.0 * scale_factor, -65.0 * scale_factor),
-			(-225.0 * scale_factor, 170.0 * scale_factor, -135.0 * scale_factor),
-			(225.0 * scale_factor, 170.0 * scale_factor, -135.0 * scale_factor),
-			(-150.0 * scale_factor, -150.0 * scale_factor, -125.0 * scale_factor),
-			(150.0 * scale_factor, -150.0 * scale_factor, -125.0 * scale_factor)])
+			(0.0, 0.0, 0.0),                                                      # Nose tip (4)
+			(0.0, -330.0 * scale_factor, -65.0 * scale_factor),                  # Chin (152)
+			(-225.0 * scale_factor, 170.0 * scale_factor, -135.0 * scale_factor), # Left eye outer corner (263)
+			(225.0 * scale_factor, 170.0 * scale_factor, -135.0 * scale_factor),  # Right eye outer corner (33)
+			(-150.0 * scale_factor, -150.0 * scale_factor, -125.0 * scale_factor),# Left Mouth corner (291)
+			(150.0 * scale_factor, -150.0 * scale_factor, -125.0 * scale_factor)  # Right mouth corner (61)
+		])
+
 		focal_length = image_size[1]
 		center = (image_size[1] / 2, image_size[0] / 2)
 		camera_matrix = np.array([[focal_length, 0, center[0]], [0, focal_length, center[1]], [0, 0, 1]],
 		                         dtype="double")
 		dist_coeffs = np.zeros((4, 1))
+
+		# Gather the 2D image points corresponding to the 3D model points.
+		# The order MUST match the order in `model_points`.
+		# The indices are loaded from the config file via `self._indices_pose`.
 		image_points = np.array([
-			landmarks[self.NOSE_TIP_INDEX], landmarks[self.CHIN_INDEX],
-			landmarks[self.LEFT_EYE_OUTER_CORNER], landmarks[self.RIGHT_EYE_OUTER_CORNER],
-			landmarks[self.LEFT_MOUTH_CORNER], landmarks[self.RIGHT_MOUTH_CORNER]], dtype="double")
+			landmarks[idx] for idx in self._indices_pose
+		], dtype="double")
 
 		try:
 			(success, rotation_vector, translation_vector) = cv.solvePnP(model_points, image_points, camera_matrix,
@@ -1128,7 +1152,7 @@ class HeadGazeTracker(object):
 				'id': self.trial_counter, 'start_time_ms': start_t,
 				'stimulus_end_time_ms': stim_end_t, 'trial_end_time_ms': trial_end_t,
 				'active': True, 'stimulus_frames_processed_gaze': 0,
-				'frames_on_stimulus_area': 0, 'looked_final': 2}
+				'frames_on_stimulus_area': 0, 'looked_final': 1}
 			if self.PRINT_DATA:
 				self.logger.info(
 					f"Trial {self.trial_counter} START @{start_t}ms (Part {self.current_video_part}). ROI Bright: {self.current_roi_brightness:.2f}")
@@ -1142,10 +1166,12 @@ class HeadGazeTracker(object):
 
 				# Finalize trial classification (looked vs. away)
 				if self.current_trial_data['stimulus_frames_processed_gaze'] > 0:
-					perc = (self.current_trial_data['frames_on_stimulus_area'] /
-					        self.current_trial_data['stimulus_frames_processed_gaze']) * 100
-					if perc >= self.LOOK_TO_STIMULUS_THRESHOLD_PERCENT:
-						self.current_trial_data['looked_final'] = 1
+					perc_on_stim = (self.current_trial_data['frames_on_stimulus_area'] /
+					                self.current_trial_data['stimulus_frames_processed_gaze']) * 100
+					# If the percentage is below the threshold, classify as 'away' (2).
+					# Otherwise, it remains the default 'looked' (1).
+					if perc_on_stim < self.LOOK_TO_STIMULUS_THRESHOLD_PERCENT:
+						self.current_trial_data['looked_final'] = 2
 
 				trial_id = self.current_trial_data['id']
 				self.last_trial_result_text = f"Trial {trial_id} Result: {'Looked (1)' if self.current_trial_data['looked_final'] == 1 else 'Away (2)'}"
@@ -1167,10 +1193,12 @@ class HeadGazeTracker(object):
 
 				# Finalize trial classification (looked vs. away)
 				if self.current_trial_data['stimulus_frames_processed_gaze'] > 0:
-					perc = (self.current_trial_data['frames_on_stimulus_area'] /
-					        self.current_trial_data['stimulus_frames_processed_gaze']) * 100
-					if perc >= self.LOOK_TO_STIMULUS_THRESHOLD_PERCENT:
-						self.current_trial_data['looked_final'] = 1
+					perc_on_stim = (self.current_trial_data['frames_on_stimulus_area'] /
+					                self.current_trial_data['stimulus_frames_processed_gaze']) * 100
+					# If the percentage is below the threshold, classify as 'away' (2).
+					# Otherwise, it remains the default 'looked' (1).
+					if perc_on_stim < self.LOOK_TO_STIMULUS_THRESHOLD_PERCENT:
+						self.current_trial_data['looked_final'] = 2
 
 				trial_id = self.current_trial_data['id']
 				self.last_trial_result_text = f"Trial {trial_id} Result: {'Looked (1)' if self.current_trial_data['looked_final'] == 1 else 'Away (2)'}"
@@ -1203,8 +1231,8 @@ class HeadGazeTracker(object):
 			self.current_trial_data = {
 				'id': self.trial_counter, 'start_time_ms': start_t,
 				'stimulus_end_time_ms': stim_end_t, 'trial_end_time_ms': trial_end_t,
-				'active': True, 'stimulus_frames_processed_gaze': 0,
-				'frames_on_stimulus_area': 0, 'looked_final': 2}
+				'active': True, 'stimulus_frames_processed_gaze': 0, 'frames_on_stimulus_area': 0,
+				'looked_final': 1}
 			self.next_eeg_trial_index += 1 # Move to the next trial in the list
 			if self.PRINT_DATA:
 				self.logger.info(f"EEG Trial {self.trial_counter} START @{start_t}ms (Part {self.current_video_part}).")
@@ -1601,10 +1629,12 @@ class HeadGazeTracker(object):
 			if self.PRINT_DATA: self.logger.info(
 				f"Finalizing active trial {self.current_trial_data['id']} on exit/split (Part {self.current_video_part}).")
 			if self.current_trial_data['stimulus_frames_processed_gaze'] > 0:
-				perc = (self.current_trial_data['frames_on_stimulus_area'] /
-				        self.current_trial_data['stimulus_frames_processed_gaze']) * 100
-				if perc >= self.LOOK_TO_STIMULUS_THRESHOLD_PERCENT:
-					self.current_trial_data['looked_final'] = 1
+				perc_on_stim = (self.current_trial_data['frames_on_stimulus_area'] /
+				                self.current_trial_data['stimulus_frames_processed_gaze']) * 100
+				# If the percentage is below the threshold, classify as 'away' (2).
+				# Otherwise, it remains the default 'looked' (1).
+				if perc_on_stim < self.LOOK_TO_STIMULUS_THRESHOLD_PERCENT:
+					self.current_trial_data['looked_final'] = 2
 			self.all_trials_summary.append(self.current_trial_data.copy())
 			self.current_trial_data = None  # Clear after adding
 
@@ -1640,8 +1670,9 @@ class HeadGazeTracker(object):
 		subj = self.subject_id or 'NA'
 
 		base_filename = getattr(self, "OUTPUT_MAIN_LOG_FILENAME_PREFIX", "eye_tracking_log_")
-		csv_fn = os.path.join(folder, f"{subj}_{self.session}_{base_filename.replace('.csv', '')}{part_suffix}_{ts_str}.csv")
-
+		# --- IMPROVEMENT: Embed FPS directly into the filename for easier parsing later ---
+		fps_str = f"{self.FPS:.1f}fps"
+		csv_fn = os.path.join(folder, f"{subj}_{self.session}_{base_filename.replace('.csv', '')}{part_suffix}_{fps_str}_{ts_str}.csv")
 		os.makedirs(os.path.dirname(csv_fn), exist_ok=True)
 
 		# Padding logic - consider if this is still desired per part, or only for the whole video.
@@ -1815,6 +1846,12 @@ class HeadGazeTracker(object):
 			while True:
 				self.frame_count += 1
 				self._reset_per_frame_state()
+
+				# --- NEW: Frame Skipping Logic ---
+				if self.frame_count > 0 and self.FRAME_SKIP > 1 and (self.frame_count % self.FRAME_SKIP) != 0:
+					ret = self.cap.grab() # Efficiently skip frame without decoding
+					if not ret: break
+					continue # Go to the next iteration of the loop
 
 				frame, img_h, img_w, ret = self._get_and_preprocess_frame()
 				if not ret:
