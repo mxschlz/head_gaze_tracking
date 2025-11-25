@@ -84,7 +84,7 @@ def analyze_attention_getter_effect(df, header_file, marker_file, eeg_sync_info)
         # from a baseline window just BEFORE the onset to a response window immediately AFTER the onset.
         # This is more robust and directly measures the re-orienting effect.
         # Baseline window: 1 second before the event.
-        pre_onset_window = df[(df['Timestamp (ms)'] >= onset_ms - 1000) & (df['Timestamp (ms)'] < onset_ms)]
+        pre_onset_window = df[(df['Timestamp (ms)'] >= onset_ms - 100) & (df['Timestamp (ms)'] < onset_ms)]
         # Response window: 5 seconds immediately after the event starts.
         post_onset_window = df[(df['Timestamp (ms)'] > onset_ms) & (df['Timestamp (ms)'] <= onset_ms + 5000)]
 
@@ -514,35 +514,65 @@ if attention_getter_results:
     ag_long_df['condition'] = ag_long_df['measurement'].apply(lambda x: 'Pre-Onset' if 'pre' in x else 'Post-Onset')
     ag_long_df['angle_type'] = ag_long_df['measurement'].apply(lambda x: 'Pitch' if 'pitch' in x else 'Yaw')
 
+    # --- NEW: Create a unique ID for each subject-session pair for plotting ---
+    ag_long_df['subject_session'] = ag_long_df['subject_id'] + " (" + ag_long_df['session'] + ")"
+
     # Create a FacetGrid to have separate plots for Pitch and Yaw
-    g = sns.FacetGrid(ag_long_df, col="angle_type", hue="subject_id",
+    # Hue is now mapped to the unique session to give each a distinct color.
+    g = sns.FacetGrid(ag_long_df, col="angle_type", hue="subject_session",
                       sharex=True, sharey=False, height=8, aspect=1.2)
 
     # Map the line plot to draw the "dumbbell" lines
-    g.map(sns.lineplot, "angle", "subject_id", marker="", sort=False, estimator=None, lw=3, alpha=0.8)
+    g.map(sns.lineplot, "angle", "subject_session", marker="", sort=False, estimator=None, lw=3, alpha=0.8)
 
     # Map the scatter plot to draw the "before" and "after" points
-    # --- FIX: Use 'style' instead of 'hue' for the condition ---
-    # The FacetGrid already uses 'hue' for 'subject_id'. Passing 'condition' as a positional
-    # argument makes seaborn interpret it as a second 'hue', causing a TypeError.
-    # By mapping 'condition' to 'style', we can use different markers for pre/post
-    # without conflicting with the color mapping.
-    # --- FIX 2: Use map_dataframe to correctly interpret the 'style' argument ---
-    # g.map() passes raw data arrays, but g.map_dataframe() passes the dataframe subset,
-    # which allows seaborn to look up the 'condition' column by its string name.
-    g.map_dataframe(sns.scatterplot, x="angle", y="subject_id", style="condition",
-                    markers={'Pre-Onset': 'X', 'Post-Onset': 'o'}, s=250, legend='full', zorder=5)
+    g.map_dataframe(sns.scatterplot, x="angle", y="subject_session", style="condition",
+                    markers={'Pre-Onset': 'X', 'Post-Onset': 'o'}, s=250, legend=False, zorder=5)
 
     # Add a vertical line at 0 to represent the baseline
     g.map(plt.axvline, x=0, color='black', linestyle='--', lw=2, alpha=0.7)
 
     g.set_titles("{col_name} Angle Re-orientation", size=18)
-    g.set_axis_labels("Head Angle (degrees)", "Subject ID")
-    g.add_legend(title="Condition")
+    g.set_axis_labels("Head Angle (degrees)", "Subject (Session)")
+
+    # --- FIX: Manually create the legend to resolve the TypeError ---
+    # The hue legend is too busy, so we only add the marker legend.
+    from matplotlib.lines import Line2D
+    legend_handles = [
+        Line2D([0], [0], marker='X', color='w', label='Pre-Onset', markerfacecolor='k', markersize=10),
+        Line2D([0], [0], marker='o', color='w', label='Post-Onset', markerfacecolor='k', markersize=10)
+    ]
+    g.add_legend(handles=legend_handles, title="Condition", label_order=['Pre-Onset', 'Post-Onset'])
+
     g.fig.suptitle("Head Pose Re-orientation Following Attention Getters", fontsize=22, y=1.03)
     plt.tight_layout(rect=[0, 0, 1, 0.98])
 
     g.savefig(plots_dir / "attention_getter_reorientation_effect.svg")
+
+    # --- NEW: Bar plot showing average pre vs. post absolute head pose ---
+    # This provides a clear summary of the overall effect.
+    print("\nPlotting summary bar plot for attention getter effect...")
+    bar_plot_df = ag_long_df.copy()
+    bar_plot_df['absolute_angle'] = bar_plot_df['angle'].abs()
+
+    # --- MODIFIED: Use catplot to facet by subject ---
+    g = sns.catplot(
+        data=bar_plot_df,
+        x='angle_type',
+        y='absolute_angle',
+        hue='condition',
+        col='subject_id',
+        kind='bar',
+        errorbar='se',  # Show standard error of the mean
+        col_wrap=4,  # Wrap plots after 4 columns
+        height=5,
+        aspect=1.1
+    )
+    g.fig.suptitle('Absolute Head Pose Before vs. After Attention Getter (by Subject)', y=1.03)
+    g.set_axis_labels("Angle Component", "Average Absolute Angle (degrees)")
+    g.set_titles("Subject: {col_name}")
+    g.tight_layout(rect=[0, 0, 1, 1])
+    g.savefig(plots_dir / "attention_getter_pre_vs_post_barplot_by_subject.svg")
 
 # --- New: Plot Excluded Trial Proportions ---
 if excluded_trials_results:
