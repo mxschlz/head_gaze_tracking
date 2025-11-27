@@ -20,7 +20,6 @@ System:
   # Set to False for "headless" batch processing to gain a significant speed boost.
   SHOW_ON_SCREEN_DATA: True
 
-  # TODO: not yet implemented
   # --- Performance Tuning ---
   # To improve speed, you can process a subset of frames.
   # 1 = Process every frame (most detailed, slowest).
@@ -98,7 +97,8 @@ Features:
   ENABLE_HEAD_POSE: True
   # Width of the user's face in millimeters (outer cheekbone to outer cheekbone).
   # This is important for accurate scaling of the 3D head model.
-  USER_FACE_WIDTH: 150 # [mm]
+  # Adult is ~150mm. For infants (6-12mo), a value of ~100mm is more appropriate.
+  USER_FACE_WIDTH: 100 # [mm]
   # Number of frames to average for smoothing head pose angles. Higher = smoother but more lag.
   MOVING_AVERAGE_WINDOW: 10
 
