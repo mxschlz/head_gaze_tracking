@@ -35,6 +35,22 @@ subjects_to_include = [
     #'SMS059'
 ]
 
+# --- NEW: Define consistent color palettes for subjects and sessions ---
+# This ensures that a subject or session is always represented by the same color across all plots.
+
+# Generate a colorblind-friendly palette with enough colors for all potential subjects.
+subject_colors = sns.color_palette("colorblind", n_colors=max(10, len(subjects_to_include) if subjects_to_include else 10))
+
+# If you know all subjects beforehand, you can use the `subjects_to_include` list.
+# If not, we will build this dynamically later. For now, this is a placeholder.
+subject_palette = {subject: color for subject, color in zip(subjects_to_include, subject_colors)}
+
+# Define a fixed palette for sessions using shades of grey.
+session_palette = {
+    "A": sns.color_palette("Greys", 5)[1],
+    "B": sns.color_palette("Greys", 5)[2],
+    "C": sns.color_palette("Greys", 5)[3],
+}
 
 def analyze_attention_getter_effect(df, header_file, marker_file, eeg_sync_info):
     """
@@ -324,6 +340,12 @@ for file_path in eye_tracking_files:
 # Concatenate all dataframes into a single one
 df = pd.concat(df_list, ignore_index=True)
 
+# --- NEW: Finalize the subject palette based on the data that was actually loaded ---
+all_subjects_in_data = df['subject_id'].unique()
+if not subject_palette or len(all_subjects_in_data) > len(subject_palette):
+    subject_colors = sns.color_palette("colorblind", n_colors=len(all_subjects_in_data))
+    subject_palette = {subject: color for subject, color in zip(all_subjects_in_data, subject_colors)}
+
 # --- New Plot: Angle Distribution Across Trials ---
 # Filter out the inter-trial data to focus only on frames within a trial
 trials_only_df = df[df['Trial ID'] > 0].copy()
@@ -344,10 +366,10 @@ averaged_long_df = averaged_trials_df.melt(id_vars=['subject_id', 'Trial ID'], v
 # 1. Plot each individual subject's KDE with low alpha
 g = sns.displot(
     data=averaged_long_df, x="average_angle_value", col="angle_type",
-    kind="kde", hue="subject_id", common_norm=False,
+    kind="kde", hue="subject_id", palette=subject_palette, common_norm=False,
     fill=False, legend=False,  # Disable default legend, we create a custom one
-    alpha=0.7, linewidth=2,
-    facet_kws=dict(sharey=True, sharex=False), height=7, aspect=1.1
+    alpha=1.0, linewidth=2,
+    facet_kws=dict(sharey=True, sharex=False), height=5, aspect=1.0
 )
 
 # 2. Overlay the grand average KDE on each facet
@@ -358,12 +380,12 @@ for i, angle_type in enumerate(['Pitch', 'Yaw']):
     # Plot the grand average KDE on the axis
     sns.kdeplot(data=subset_df, x='average_angle_value', color='black', linewidth=4, ax=ax, label='Grand Average')
     # Add a vertical reference line at 0
-    ax.axvline(0, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
+    ax.axvline(0, color='black', linestyle='--', linewidth=1.5, alpha=1.0)
 
 # 3. Create a custom legend
 g.fig.suptitle("Distribution of Mean Head Angles per Trial")
-g.set_axis_labels("Mean Angle per Trial (degrees)", "Density")
-g.set_titles("{col_name} Angle")
+g.set_axis_labels("Mean Angle (°)", "Density")
+g.set_titles("{col_name}")
 plt.tight_layout()
 g.savefig(plots_dir / "distribution_mean_head_angles.svg")
 
@@ -380,13 +402,14 @@ fuzziness_df = averaged_trials_df.groupby(['subject_id', 'session']).agg(
 fuzziness_df['fuzziness'] = fuzziness_df[['Pitch_std', 'Yaw_std']].mean(axis=1)
 
 # Create a bar plot to visualize the fuzziness scores
-plt.figure(figsize=(18, 9))
-sns.barplot(data=fuzziness_df, x='subject_id', y='fuzziness', hue="session", dodge=True, palette="mako")
-plt.title('Overall Head Pose Variability (fuzziness)')
-plt.ylabel('Mean SD of Head Angles (degrees)')
-plt.xlabel('Subject ID')
-plt.legend(title="Session")
-plt.xticks(rotation=45, ha='right')
+plt.figure()
+g = sns.barplot(data=fuzziness_df, x='session', y='fuzziness',
+                hue='session', palette=session_palette, legend=False)
+sns.lineplot(fuzziness_df, x="session", y="fuzziness", hue="subject_id", palette=subject_palette, legend=False)
+
+g.set_title('Overall Head Pose Variability (fuzziness)')
+g.set_xlabel("Session")
+g.set_ylabel("Fuzziness (°)")
 plt.tight_layout()
 plt.savefig(plots_dir / "fuzziness_score_variability.svg")
 
@@ -411,9 +434,9 @@ intra_trial_variability_long_df = intra_trial_variability_df.melt(
 # --- MODIFIED: Plot individual subjects AND the grand average ---
 # 1. Plot each individual subject's line with low alpha
 g = sns.relplot(data=intra_trial_variability_long_df, x='Trial ID', y='Intra_Trial_Std_Dev',
-                col='Angle_Component', kind='line', hue='subject_id',
-                aspect=1.4, height=6,
-                legend=False, alpha=0.4, linewidth=1.5, errorbar=None)
+                col='Angle_Component', kind='line', hue='subject_id', palette=subject_palette,
+                aspect=1.5, height=5,
+                legend=False, alpha=1.0, linewidth=1.5, errorbar=None)
 
 # 2. Overlay the grand average line on each facet
 for i, angle_type in enumerate(['Pitch_std', 'Yaw_std']):
@@ -423,8 +446,8 @@ for i, angle_type in enumerate(['Pitch_std', 'Yaw_std']):
                  color='black', linewidth=4, errorbar=None, ax=ax, label='Grand Average')
 
 g.fig.suptitle('Intra-Trial Head Pose Variability Over Trials (fuzziness)')
-g.set_axis_labels("Trial ID", "Intra-Trial fuzziness (degrees)")
-g.set_titles("{col_name} Angle")
+g.set_axis_labels("Trial ID", "Intra-Trial fuzziness (°)")
+g.set_titles("{col_name}")
 g.map(plt.axhline, y=0, color='black', linestyle='--', linewidth=1.5, alpha=0.7) # Add reference line
 plt.tight_layout()
 g.savefig(plots_dir / "intra_trial_variability_evolution.svg")
@@ -437,9 +460,9 @@ print("\nPlotting temporal evolution of mean head pose per subject...")
 # --- MODIFIED: Plot individual subjects AND the grand average ---
 # 1. Plot each individual subject's line with low alpha
 g = sns.relplot(data=averaged_long_df, x='Trial ID', y='average_angle_value', col='angle_type',
-                kind='line', hue='subject_id', errorbar=None,
+                kind='line', hue='subject_id', palette=subject_palette, errorbar=None,
                 facet_kws=dict(sharey=True), aspect=1.5, height=5,
-                legend=False, alpha=0.4, linewidth=1.5)
+                legend=False, alpha=1.0, linewidth=1.5)
 
 # 2. Overlay the grand average line on each facet
 for i, angle_type in enumerate(['Pitch', 'Yaw']):
@@ -449,8 +472,8 @@ for i, angle_type in enumerate(['Pitch', 'Yaw']):
                  color='black', linewidth=4, errorbar=None, ax=ax, label='Grand Average')
 
 g.fig.suptitle('Mean Head Pose Over Trials')
-g.set_axis_labels("Trial ID", "Mean Angle (degrees)")
-g.set_titles("{col_name} Angle")
+g.set_axis_labels("Trial ID", "Mean Angle (°)")
+g.set_titles("{col_name}")
 g.map(plt.axhline, y=0, color='black', linestyle='--', linewidth=1.5, alpha=0.7) # Add reference line
 
 # 3. Add a clear legend
@@ -473,11 +496,11 @@ if reliability_results:
     print(reliability_summary.to_string(index=False))
 
     # Create a bar plot to visualize the kappa scores
-    plt.figure(figsize=(18, 9))
-    sns.barplot(data=reliability_df, x='subject_id', y='kappa', hue='comparison', dodge=True, palette="rocket")
-    plt.title('Cohen\'s Kappa: Algorithm vs. Human Raters')
+    plt.figure()
+    sns.barplot(data=reliability_df, x="subject_id", hue='subject_id', y='kappa', palette=subject_palette, legend=False)
+    plt.title('Cohen\'s Kappa Between Two Human Raters')
     plt.ylabel('Cohen\'s Kappa Score')
-    plt.xlabel('Subject ID')
+    plt.xlabel('Subject')
     plt.axhline(y=0, color='black', linestyle='--', alpha=0.7, label='Chance Agreement (0.0)')
     plt.axhline(y=0.6, color='grey', linestyle='--', label='Substantial Agreement (0.6)')
     plt.axhline(y=0.8, color='black', linestyle='--', label='Almost Perfect Agreement (0.8)')
@@ -566,12 +589,13 @@ if attention_getter_results:
         errorbar='se',  # Show standard error of the mean
         col_wrap=4,  # Wrap plots after 4 columns
         height=5,
-        aspect=1.1
+        aspect=1.1,
+        palette="Paired"
     )
     g.fig.suptitle('Absolute Head Pose Before vs. After Attention Getter (by Subject)', y=1.03)
-    g.set_axis_labels("Angle Component", "Average Absolute Angle (degrees)")
+    g.set_axis_labels("Angle Component", "Average Absolute Angle (°)")
     g.set_titles("Subject: {col_name}")
-    g.tight_layout(rect=[0, 0, 1, 1])
+    g.tight_layout()
     g.savefig(plots_dir / "attention_getter_pre_vs_post_barplot_by_subject.svg")
 
 # --- New: Plot Excluded Trial Proportions ---
@@ -588,11 +612,11 @@ if excluded_trials_results:
     print("\nAverage Proportion of Excluded Trials by Rater:")
     print(excluded_summary.to_string(index=False))
 
-    plt.figure(figsize=(12, 8))
-    sns.barplot(data=excluded_df, x='rater', y='excluded_proportion', errorbar='se', palette="crest")
+    plt.figure()
+    sns.barplot(data=excluded_df, x='rater', y='excluded_proportion', errorbar=None, palette="bone")
+    sns.lineplot(data=excluded_df, x="rater", y="excluded_proportion", errorbar=None, hue="subject_id", palette=subject_palette, legend=False)
     plt.title('Proportion of Excluded Trials')
     plt.ylabel('Proportion of Trials Excluded')
-    plt.xlabel('Coder')
     plt.tight_layout()
     plt.savefig(plots_dir / "excluded_trials_proportion.svg")
 
@@ -622,16 +646,15 @@ session_avg_pose_long_df['Absolute Mean Angle (degrees)'] = session_avg_pose_lon
 # Create a categorical plot to visualize the results, with session on the x-axis.
 g = sns.catplot(data=session_avg_pose_long_df, x='session', y='Absolute Mean Angle (degrees)',
                 hue='session', col='Angle Component',
-                kind='bar', palette='deep', height=7, aspect=1.2,
-                legend=False)
+                kind='bar', palette=session_palette, height=5, aspect=1.0,
+                legend=False, errorbar=None)
 
 # Overlay a stripplot to show the individual subject data points.
-g.map_dataframe(sns.stripplot, x='session', y='Absolute Mean Angle (degrees)',
-                hue='session', palette=['#444444'], dodge=False,
-                edgecolor='lightgrey', linewidth=1, jitter=0.15)
+g.map_dataframe(sns.lineplot, x='session', y='Absolute Mean Angle (degrees)', hue="subject_id", palette=subject_palette)
 
 g.fig.suptitle('Overall Head Pose Deviation by Session')
-g.set_axis_labels("Session", "Absolute Mean Angle (degrees)")
+g.set_axis_labels("Session", "Absolute Mean Angle (°)")
 g.set_titles("{col_name} Angle")
+
 g.tight_layout()
 g.savefig(plots_dir / "mean_head_pose_by_session.svg")
