@@ -919,10 +919,10 @@ class HeadGazeTracker(object):
 			self.adj_pitch, self.adj_yaw, self.adj_roll = self.smooth_pitch, self.smooth_yaw, self.smooth_roll
 
 	def _perform_clustering_calibration(self):
-		"""Finds the baseline pose by clustering all collected samples."""
+		"""Finds the baseline pose by clustering all collected samples. Returns the DBSCAN labels."""
 		if not self.clustering_calib_all_samples:
 			if self.PRINT_DATA: self.logger.warning("Clustering calibration failed: No samples collected.")
-			return
+			return None
 
 		pose_array = np.array(self.clustering_calib_all_samples)
 		if self.PRINT_DATA:
@@ -956,6 +956,8 @@ class HeadGazeTracker(object):
 		if self.PRINT_DATA:
 			self.logger.info(f"Calibration completed via clustering.")
 			self.logger.info(f"New Initial Pose: P={self.initial_pitch:.1f}, Y={self.initial_yaw:.1f}, R={self.initial_roll:.1f}")
+
+		return labels
 
 	def find_first_stimulus_onset(self):
 		"""
