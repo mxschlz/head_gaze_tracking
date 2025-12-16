@@ -1,5 +1,5 @@
-from HeadGazeTracker.HeadGazeTracker import HeadGazeTracker
-from HeadGazeTracker import get_data_path
+from ocapi.HeadGazeTracker import HeadGazeTracker
+from ocapi import get_data_path
 import pathlib
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 from gooey import Gooey, GooeyParser
 import os
-from HeadGazeTracker.HeadGazeTracker import HeadGazeTracker
+from ocapi.HeadGazeTracker import HeadGazeTracker
 import logging
 
 
@@ -24,7 +24,7 @@ import logging
 )
 def main():
     """
-    Main function to parse arguments and run the HeadGazeTracker.
+    Main function to parse arguments and run the ocapi.
     The @Gooey decorator will automatically turn this into a GUI.
     """
     parser = GooeyParser(description="Configure and run the Head & Gaze Tracker")
@@ -131,7 +131,7 @@ def main():
     # --- Run the Tracker ---
     try:
         print("="*50)
-        print("Initializing HeadGazeTracker with settings from GUI...")
+        print("Initializing ocapi with settings from GUI...")
         print("="*50)
 
         tracker = HeadGazeTracker(
@@ -151,7 +151,7 @@ def main():
         # Gooey will display this in a popup on error
         print(f"An error occurred: {e}")
         logging.basicConfig()
-        logging.critical(f"Failed to initialize or run HeadGazeTracker: {e}", exc_info=True)
+        logging.critical(f"Failed to initialize or run ocapi: {e}", exc_info=True)
         # In a real app, you might want more robust error handling/logging here.
 
 

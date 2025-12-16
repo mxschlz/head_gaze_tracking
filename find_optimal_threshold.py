@@ -13,7 +13,7 @@ project_root = os.path.dirname(os.path.abspath(__file__))
 if project_root not in sys.path:
 	sys.path.insert(0, project_root)
 
-from HeadGazeTracker.HeadGazeTracker import HeadGazeTracker
+from ocapi.HeadGazeTracker import HeadGazeTracker
 from inter_rater_reliability import calculate_cohens_kappa
 
 
@@ -81,7 +81,7 @@ def run_optimization(subject, video, truth, truth_col, output_folder, config, th
 		with open(temp_config_path, 'w') as f:
 			yaml.dump(current_config, f)
 
-		# 2. Run the HeadGazeTracker
+		# 2. Run the ocapi
 		try:
 			print(f"Processing video: {video} (up to {part1_duration_ms} ms)")
 			run_start_time = time.time()

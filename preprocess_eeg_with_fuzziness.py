@@ -8,7 +8,7 @@ import autoreject
 
 # --- Import necessary functions from your existing project ---
 # We need these to locate data and merge tracking/trial info.
-from HeadGazeTracker import get_data_path
+from ocapi import get_data_path
 from merge_tracking_and_trial_data import merge_tracking_and_trial_data
 
 preproc_params = dict(

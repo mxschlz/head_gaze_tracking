@@ -1,7 +1,7 @@
 # calibrate_compensatory_gaze.py
 
 import cv2 as cv
-from HeadGazeTracker.HeadGazeTracker import HeadGazeTracker
+from ocapi.HeadGazeTracker import HeadGazeTracker
 
 
 def run_calibration_tool():
@@ -65,7 +65,7 @@ def run_calibration_tool():
 	yaw_right = tracker.COMPENSATORY_HEAD_YAW_RANGE_RIGHT
 
 	while True:
-		# --- Simplified main loop from HeadGazeTracker.run() ---
+		# --- Simplified main loop from ocapi.run() ---
 		tracker._reset_per_frame_state()
 
 		frame, img_h, img_w, ret = tracker._get_and_preprocess_frame()

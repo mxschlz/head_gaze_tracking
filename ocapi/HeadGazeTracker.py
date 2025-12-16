@@ -1932,7 +1932,7 @@ if __name__ == "__main__":
 	config_path = "config.yaml"  # Ensure this path is correct
 	try:
 		# Example:
-		# tracker = HeadGazeTracker(
+		# tracker = ocapi(
 		# subject_id="test_split",
 		# config_file_path=config_path,
 		# VIDEO_INPUT="path/to/your/long_video.mp4",

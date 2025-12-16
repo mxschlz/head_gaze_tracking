@@ -12,7 +12,7 @@ custom_params = {"axes.spines.right": False, "axes.spines.top": False}
 sns.set_theme(style="ticks", palette="colorblind", context="talk", font_scale=1.0, rc=custom_params)
 
 # --- Import necessary functions from your existing project ---
-from HeadGazeTracker import get_data_path
+from ocapi import get_data_path
 
 plt.ion()
 

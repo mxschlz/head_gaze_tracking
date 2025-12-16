@@ -10,10 +10,10 @@ def process_batch(input_folder, output_folder, config_file):
 	This function contains the core video processing logic.
 	It's called only when the script is running inside the target conda environment.
 	"""
-	# Import HeadGazeTracker here to ensure it's imported by the
+	# Import ocapi here to ensure it's imported by the
 	# Python interpreter from the 'hgt' environment.
-	from HeadGazeTracker import get_data_path
-	from HeadGazeTracker.HeadGazeTracker import HeadGazeTracker
+	from ocapi import get_data_path
+	from ocapi.HeadGazeTracker import HeadGazeTracker
 
 	print(f"--- Running video processing in Python: {sys.executable} ---")
 
@@ -158,7 +158,7 @@ def process_batch(input_folder, output_folder, config_file):
 			f.write(f"- {filename}\n")
 
 if __name__ == "__main__":
-	parser = argparse.ArgumentParser(description="Batch process videos with HeadGazeTracker and EEG synchronization.")
+	parser = argparse.ArgumentParser(description="Batch process videos with ocapi and EEG synchronization.")
 	parser.add_argument('-i', '--input', required=True, help="Folder containing the input videos (e.g., '.../trimmed/').")
 	parser.add_argument('-o', '--output', required=True, help="Folder to save processed videos and logs.")
 	parser.add_argument('-c', '--config', default="config.yml", help="Path to the configuration file (e.g., 'config.yml').")
