@@ -1,4 +1,4 @@
-from ocapi.Ocapi import Ocapi
+from ocapi.ocapi import Ocapi
 from ocapi import get_data_path
 import pathlib
 

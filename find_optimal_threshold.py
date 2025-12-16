@@ -13,7 +13,7 @@ project_root = os.path.dirname(os.path.abspath(__file__))
 if project_root not in sys.path:
 	sys.path.insert(0, project_root)
 
-from ocapi.Ocapi import Ocapi
+from ocapi.ocapi import Ocapi
 from inter_rater_reliability import calculate_cohens_kappa
 
 

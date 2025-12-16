@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from merge_tracking_and_trial_data import merge_tracking_and_trial_data
 from inter_rater_reliability import calculate_cohens_kappa
-from ocapi.Ocapi import Ocapi # Import the class to use its static method
+from ocapi.ocapi import Ocapi # Import the class to use its static method
 from ocapi import get_data_path
 plt.ion()
 

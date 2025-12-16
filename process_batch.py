@@ -13,7 +13,7 @@ def process_batch(input_folder, output_folder, config_file):
 	# Import ocapi here to ensure it's imported by the
 	# Python interpreter from the 'hgt' environment.
 	from ocapi import get_data_path
-	from ocapi.Ocapi import Ocapi
+	from ocapi.ocapi import Ocapi
 
 	print(f"--- Running video processing in Python: {sys.executable} ---")
 

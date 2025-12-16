@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 from gooey import Gooey, GooeyParser
 import os
-from ocapi.Ocapi import Ocapi
+from ocapi.ocapi import Ocapi
 import logging
 
 

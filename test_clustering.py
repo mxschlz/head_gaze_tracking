@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
-from ocapi.Ocapi import Ocapi
+from ocapi.ocapi import Ocapi
 import pathlib
 from ocapi import get_data_path
 plt.ion()
