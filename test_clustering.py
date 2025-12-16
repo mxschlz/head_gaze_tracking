@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
-from ocapi.HeadGazeTracker import HeadGazeTracker
+from ocapi.Ocapi import Ocapi
 import pathlib
 from ocapi import get_data_path
 plt.ion()
@@ -30,7 +30,7 @@ if not os.path.exists(CONFIG_FILE_PATH):
 # We initialize the tracker but won't use its full .run() method.
 # We pass dummy values for output files as we only need to collect data.
 print("--- Initializing ocapi to collect data ---")
-tracker = HeadGazeTracker(
+tracker = Ocapi(
     subject_id="visualization_test",
     config_file_path=CONFIG_FILE_PATH,
     VIDEO_INPUT=VIDEO_INPUT_PATH,

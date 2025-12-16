@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 from gooey import Gooey, GooeyParser
 import os
-from ocapi.HeadGazeTracker import HeadGazeTracker
+from ocapi.Ocapi import Ocapi
 import logging
 
 
@@ -134,7 +134,7 @@ def main():
         print("Initializing ocapi with settings from GUI...")
         print("="*50)
 
-        tracker = HeadGazeTracker(
+        tracker = Ocapi(
             subject_id=args.subject_id,
             session=args.session,
             VIDEO_INPUT=args.video_input,

@@ -1,4 +1,4 @@
-from ocapi.HeadGazeTracker import HeadGazeTracker
+from ocapi.Ocapi import Ocapi
 from ocapi import get_data_path
 import pathlib
 
@@ -48,7 +48,7 @@ EEG_EVENTS_OF_INTEREST = ["S 21", "S 22", "S 23", "S 24"]
 if __name__ == "__main__":
     # To test performance without video writing, set VIDEO_OUTPUT to None.
     # This will prevent the tracker from creating and writing to a video file.
-    tracker = HeadGazeTracker(subject_id=subject, config_file_path=CONFIG_FILE, WEBCAM=webcam,
+    tracker = Ocapi(subject_id=subject, config_file_path=CONFIG_FILE, WEBCAM=webcam,
                               VIDEO_INPUT=video_input, VIDEO_OUTPUT=None,
                               TRACKING_DATA_LOG_FOLDER=tracking_data_log_folder, session=session)
 

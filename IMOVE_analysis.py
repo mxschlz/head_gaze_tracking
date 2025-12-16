@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from merge_tracking_and_trial_data import merge_tracking_and_trial_data
 from inter_rater_reliability import calculate_cohens_kappa
-from ocapi.HeadGazeTracker import HeadGazeTracker # Import the class to use its static method
+from ocapi.Ocapi import Ocapi # Import the class to use its static method
 from ocapi import get_data_path
 plt.ion()
 
@@ -71,7 +71,7 @@ def analyze_attention_getter_effect(df, header_file, marker_file, eeg_sync_info)
     ag_events = [f"S{i}" for i in range(70, 80)]
     try:
         # We can reuse the static method from ocapi to parse the EEG files
-        _, ag_samples_raw = HeadGazeTracker.get_eeg_stimulus_times(
+        _, ag_samples_raw = Ocapi.get_eeg_stimulus_times(
             header_file, marker_file, stimulus_description="Stimulus", events_of_interest=ag_events
         )
     except (ValueError, FileNotFoundError) as e:

@@ -169,7 +169,7 @@ class Ocapi(object):
 	def _setup_logging(self):
 		"""Configures the logger for the tracker."""
 		# Use a unique name for the logger to avoid conflicts.
-		logger_name = f"HeadGazeTracker_{self.subject_id or 'default'}_{id(self)}"
+		logger_name = f"Ocapi_{self.subject_id or 'default'}_{id(self)}"
 		self.logger = logging.getLogger(logger_name)
 		self.logger.setLevel(logging.INFO)  # Set the lowest level to capture all messages.
 
@@ -1939,11 +1939,11 @@ if __name__ == "__main__":
 		# VIDEO_OUTPUT="output/test_split_processed.mp4", # Base name for output video
 		# TRACKING_DATA_LOG_FOLDER="output/logs_test_split"
 		# )
-		tracker = HeadGazeTracker(config_file_path=config_path)  # For default testing from config
+		tracker = Ocapi(config_file_path=config_path)  # For default testing from config
 		tracker.run()
 	except Exception as e:
 		# If the logger hasn't been set up, this will print to console.
 		logging.basicConfig()
-		logging.critical(f"Failed to initialize or run HeadGazeTracker: {e}", exc_info=True)
+		logging.critical(f"Failed to initialize or run Ocapi: {e}", exc_info=True)
 		import traceback
 		traceback.print_exc()

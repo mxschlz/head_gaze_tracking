@@ -13,7 +13,7 @@ def process_batch(input_folder, output_folder, config_file):
 	# Import ocapi here to ensure it's imported by the
 	# Python interpreter from the 'hgt' environment.
 	from ocapi import get_data_path
-	from ocapi.HeadGazeTracker import HeadGazeTracker
+	from ocapi.Ocapi import Ocapi
 
 	print(f"--- Running video processing in Python: {sys.executable} ---")
 
@@ -96,7 +96,7 @@ def process_batch(input_folder, output_folder, config_file):
 		print(f"  Log folder will be: {tracking_data_log_folder}")
 
 		try:
-			tracker = HeadGazeTracker(
+			tracker = Ocapi(
 				subject_id=subject_id,
 				session=session,
 				config_file_path=config_file,

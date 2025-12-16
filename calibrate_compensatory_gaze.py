@@ -1,7 +1,7 @@
 # calibrate_compensatory_gaze.py
 
 import cv2 as cv
-from ocapi.HeadGazeTracker import HeadGazeTracker
+from ocapi.ocapi import Ocapi
 
 
 def run_calibration_tool():
@@ -22,7 +22,7 @@ def run_calibration_tool():
 	try:
 		# Initialize the tracker for webcam input.
 		# We disable trial detection as it's not needed for this tool.
-		tracker = HeadGazeTracker(
+		tracker = Ocapi(
 			config_file_path="config.yml",
 			WEBCAM=0
 		)
@@ -30,7 +30,7 @@ def run_calibration_tool():
 		tracker.SHOW_ON_SCREEN_DATA = False  # Disable default drawing for a cleaner view
 
 	except Exception as e:
-		print(f"Error initializing HeadGazeTracker: {e}")
+		print(f"Error initializing Ocapi: {e}")
 		print("Please ensure 'config.yml' is present and your webcam is working.")
 		return
 

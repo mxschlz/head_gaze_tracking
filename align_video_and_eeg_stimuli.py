@@ -1,4 +1,4 @@
-from ocapi.HeadGazeTracker import HeadGazeTracker
+from ocapi.Ocapi import Ocapi
 from ocapi import get_data_path
 import re
 import os
@@ -78,7 +78,7 @@ def main():
     # then calculates all other onsets and runs the main analysis.
     try:
         # --- Part 1: Initialize Tracker and find first stimulus in video ---
-        tracker = HeadGazeTracker(subject_id=subject, config_file_path=CONFIG_FILE, WEBCAM=webcam,
+        tracker = Ocapi(subject_id=subject, config_file_path=CONFIG_FILE, WEBCAM=webcam,
                                   VIDEO_INPUT=video_input,
                                   VIDEO_OUTPUT=video_output,
                                   TRACKING_DATA_LOG_FOLDER=tracking_data_log_folder,

@@ -13,7 +13,7 @@ project_root = os.path.dirname(os.path.abspath(__file__))
 if project_root not in sys.path:
 	sys.path.insert(0, project_root)
 
-from ocapi.HeadGazeTracker import HeadGazeTracker
+from ocapi.Ocapi import Ocapi
 from inter_rater_reliability import calculate_cohens_kappa
 
 
@@ -85,7 +85,7 @@ def run_optimization(subject, video, truth, truth_col, output_folder, config, th
 		try:
 			print(f"Processing video: {video} (up to {part1_duration_ms} ms)")
 			run_start_time = time.time()
-			tracker = HeadGazeTracker(
+			tracker = Ocapi(
 				subject_id=subject,
 				config_file_path=temp_config_path,
 				WEBCAM=None,
@@ -95,7 +95,7 @@ def run_optimization(subject, video, truth, truth_col, output_folder, config, th
 			)
 			tracker.run()
 		except Exception as e:
-			print(f"An error occurred during HeadGazeTracker execution for threshold {threshold}%: {e}")
+			print(f"An error occurred during Ocapi execution for threshold {threshold}%: {e}")
 			import traceback
 			traceback.print_exc()
 			continue
