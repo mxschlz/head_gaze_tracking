@@ -21,7 +21,7 @@ mp_face_mesh = mp.solutions.face_mesh
 drawing_spec = mp_drawing.DrawingSpec(thickness=1, circle_radius=0)
 
 
-class HeadGazeTracker(object):
+class Ocapi(object):
 	def __init__(self, subject_id=None, config_file_path="config.yaml", VIDEO_INPUT=None, VIDEO_OUTPUT=None, WEBCAM=0,
 	             TRACKING_DATA_LOG_FOLDER=None, starting_timestamp=None, total_frames=None,
 	             eeg_trial_onsets_ms=None, session=None):
