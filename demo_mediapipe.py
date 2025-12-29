@@ -12,6 +12,9 @@ from mpl_toolkits.mplot3d import Axes3D
 # ==========================================
 # [SWITCH] Set to True to enable full body (Holistic), False for Face Mesh only.
 ENABLE_FULL_BODY = True 
+# [SWITCH] Input Source: Use 0 for webcam, or provide a file path string (e.g. "my_video.mp4")
+INPUT_SOURCE = 0
+# INPUT_SOURCE = "G:\\Meine Ablage\\PhD\\misc\\MK_video.mp4"
 
 def main():
     # 1. Setup Connections
@@ -68,12 +71,15 @@ def main():
         line_rh, = ax_hand.plot(range(history_len), rh_data, label='Right Hand', color='purple')
         ax_hand.legend(loc='upper right')
     
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(INPUT_SOURCE)
 
     while cap.isOpened():
         success, image = cap.read()
         if not success:
             print("Ignoring empty camera frame.")
+            # If reading from a file, break the loop at the end to avoid infinite errors
+            if isinstance(INPUT_SOURCE, str):
+                break
             continue
 
         # To improve performance, mark the image as not writeable to pass by reference.
