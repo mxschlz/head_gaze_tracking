@@ -13,8 +13,8 @@ from mpl_toolkits.mplot3d import Axes3D
 # [SWITCH] Set to True to enable full body (Holistic), False for Face Mesh only.
 ENABLE_FULL_BODY = True 
 # [SWITCH] Input Source: Use 0 for webcam, or provide a file path string (e.g. "my_video.mp4")
-INPUT_SOURCE = 0
-# INPUT_SOURCE = "G:\\Meine Ablage\\PhD\\misc\\MK_video.mp4"
+#INPUT_SOURCE = 0
+INPUT_SOURCE = "G:\\Meine Ablage\\PhD\\misc\\MK_video.mp4"
 
 def main():
     # 1. Setup Connections
