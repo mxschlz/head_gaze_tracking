@@ -7,6 +7,7 @@ model = rppg.Model()
 with model.video_capture(0):
     last_process_time = 0
     current_hr = None
+    current_snr = None
 
     # Iterate through the preview generator (this is the main loop)
     for frame, box in model.preview:
@@ -16,9 +17,11 @@ with model.video_capture(0):
         now = time.time()
         if now - last_process_time > 1.0:
             result = model.hr(start=-10)
-            if result and result['hr']:
-                current_hr = result['hr']
-                print(f"Real-time HR: {current_hr:.1f} BPM")
+            if result:
+                current_hr = result.get('hr')
+                current_snr = result.get('sqi')
+                if current_hr:
+                    print(f"Real-time HR: {current_hr:.1f} BPM")
             last_process_time = now
 
         # 2. Visualization
@@ -27,11 +30,16 @@ with model.video_capture(0):
             y1, y2 = box[0]
             x1, x2 = box[1]
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(frame, "ROI", (x1, y2 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
             # Display HR on the frame if available
             if current_hr is not None:
-                cv2.putText(frame, f"HR: {current_hr:.1f}", (x1, y1 - 10),
+                cv2.putText(frame, f"HR: {current_hr:.1f} BPM", (x1, y1 - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+
+            if current_snr is not None:
+                cv2.putText(frame, f"SNR: {current_snr:.2f} dB", (x1, y1 - 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
 
         cv2.imshow("rPPG Monitor", frame)
 
